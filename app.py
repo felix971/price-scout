@@ -22,6 +22,7 @@ Vendors Supported:
     - Centrecom
     - Computer Alliance
     - CPL
+    - Device Deal
 """
 
 import time
@@ -46,7 +47,8 @@ vendor_names = {
     "umart": "Umart",
     "centrecom": "Centrecom",
     "computeralliance": "Computer Alliance",
-    "cpl": "CPL"
+    "cpl": "CPL",
+    "devicedeal": "Device Deal"
 }
 
 

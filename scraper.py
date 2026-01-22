@@ -27,12 +27,14 @@ from scrapers.digicor_scraper import DigicorScraper
 from scrapers.centrecom.centrecom_scraper import CentrecomScraper
 from scrapers.computeralliance_scraper import ComputerAllianceScraper
 from scrapers.cpl_scraper import CPLScraper
+from scrapers.devicedeal.devicedeal_scraper import DeviceDealScraper
 
 from scrapers.umart.umart_scraper_playwright import UmartScraper as UmartPlaywrightScraper
 from scrapers.jwc.jw_computer_scraper_playwright import JWComputersScraper as JWCPlaywrightScraper
 from scrapers.pccg.pc_case_gear_scraper_playwright import PCCaseGearScraper as PCCaseGearPlaywrightScraper
 from scrapers.scorptec.scorptec_scraper_cloud import ScorptecScraper as ScorptecCloudScraper
-from scrapers.centrecom.centrecom_scraper_playwright import CentrecomScraper as CentrecomPlaywrightScraper 
+from scrapers.centrecom.centrecom_scraper_playwright import CentrecomScraper as CentrecomPlaywrightScraper
+from scrapers.devicedeal.devicedeal_scraper_playwright import DeviceDealScraper as DeviceDealPlaywrightScraper 
 
 # Logging configuration
 logging.basicConfig(
@@ -77,7 +79,8 @@ async def scrape_mpn_single(mpn, detailed=False):
             ("Umart", UmartScraper()),
             ("Centrecom", CentrecomScraper()),
             ("Computer Alliance", ComputerAllianceScraper()),
-            ("CPL", CPLScraper())
+            ("CPL", CPLScraper()),
+            ("Device Deal", DeviceDealScraper())
         ]
     else:
         scrapers = [
@@ -89,7 +92,8 @@ async def scrape_mpn_single(mpn, detailed=False):
             ("Umart", UmartPlaywrightScraper()),
             ("Centrecom", CentrecomPlaywrightScraper()),
             ("Computer Alliance", ComputerAllianceScraper()),
-            ("CPL", CPLScraper())
+            ("CPL", CPLScraper()),
+            ("Device Deal", DeviceDealPlaywrightScraper())
         ]
 
     tasks = [scraper.scrape(mpn) for _, scraper in scrapers]  # coroutine objects
@@ -268,7 +272,7 @@ def write_results_to_csv(results, output_path: str):
         'pccasegear_price', 'pccasegear_url', 'jwcomputers_price', 'jwcomputers_url',
         'umart_price', 'umart_url', 'digicor_price', 'digicor_url',
         'centrecom_price', 'centrecom_url', 'computeralliance_price', 'computeralliance_url',
-        'cpl_price', 'cpl_url'
+        'cpl_price', 'cpl_url', 'devicedeal_price', 'devicedeal_url'
     ]
 
     with open(output_path, 'w', newline='', encoding='utf-8') as f:
@@ -292,7 +296,8 @@ def write_results_to_csv(results, output_path: str):
                 'Digicor': 'digicor',
                 'Centrecom': 'centrecom',
                 'Computer Alliance': 'computeralliance',
-                'CPL': 'cpl'
+                'CPL': 'cpl',
+                'Device Deal': 'devicedeal'
             }
 
             for vendor_name, data in result_dict.items():

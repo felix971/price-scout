@@ -31,6 +31,13 @@ def test_umart_http(mpn):
     umart_scraper = UmartScraper()
     print(asyncio.run(umart_scraper.scrape(mpn)))
 
+
+def test_ebay(mpn):
+    from scrapers.ebay.ebay_scraper import EbayScraper
+    scraper = EbayScraper()
+    print(asyncio.run(scraper.scrape(mpn)))
+
+
 def test_single_scorptec(mpn):
     url = f"https://www.scorptec.com.au/search/go?w={mpn}&cnt=1"
     r = scraper.get(url)
@@ -293,6 +300,10 @@ if __name__ == "__main__":
     # # Umart
     # print("\n--- Umart ---")
     # asyncio.run(test_single_umart(mpn))
+
+    # Ebay
+    print("\n--- Ebay ---")
+    test_ebay(mpn)
 
     print("\n" + "="*50)
     print("✅ All scrapers completed")

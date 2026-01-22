@@ -20,6 +20,7 @@ Supported Vendors:
     - Centrecom
     - Computer Alliance
     - CPL
+    - Device Deal
 """
 
 import time
@@ -35,6 +36,7 @@ from scrapers.jwc.jw_computer_scraper_http import JWComputersScraper
 from scrapers.centrecom.centrecom_scraper_http import CentrecomScraper
 from scrapers.computeralliance_scraper import ComputerAllianceScraper
 from scrapers.cpl_scraper import CPLScraper
+from scrapers.devicedeal.devicedeal_scraper_http import DeviceDealScraper
 from scraper import read_mpns_from_csv, batch_scrape_mpns, write_results_to_csv
 
 
@@ -95,6 +97,7 @@ async def main():
         ("Centrecom", CentrecomScraper()),
         ("Computer Alliance", ComputerAllianceScraper()),
         ("CPL", CPLScraper()),
+        ("Device Deal", DeviceDealScraper()),
     ]
 
     if args.mpn:
