@@ -17,6 +17,7 @@ Supported Vendors:
     - PC Case Gear
     - JW Computers
     - Umart
+    - Centrecom
 """
 
 import time
@@ -29,6 +30,7 @@ from scrapers.mwave_scraper import MwaveScraper
 from scrapers.pccg.pc_case_gear_scraper_http import PCCaseGearScraper
 from scrapers.umart.umart_scraper_http import UmartScraper
 from scrapers.jwc.jw_computer_scraper_http import JWComputersScraper
+from scrapers.centrecom.centrecom_scraper_http import CentrecomScraper
 from scraper import read_mpns_from_csv, batch_scrape_mpns, write_results_to_csv
 
 
@@ -86,6 +88,7 @@ async def main():
         ("PC Case Gear", PCCaseGearScraper()),
         ("JW Computers", JWComputersScraper()),
         ("Umart", UmartScraper()),
+        ("Centrecom", CentrecomScraper()),
     ]
 
     if args.mpn:

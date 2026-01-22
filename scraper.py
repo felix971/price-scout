@@ -24,14 +24,13 @@ from scrapers.pccg.pc_case_gear_scraper import PCCaseGearScraper
 from scrapers.jwc.jw_computer_scraper import JWComputersScraper
 from scrapers.umart.umart_scraper import UmartScraper
 from scrapers.digicor_scraper import DigicorScraper
-from scrapers.centercom_scraper import CenterComScraper
-from scrapers.computeralliance_scraper import ComputerAllianceScraper
-from scrapers.cpl_scraper import CPLScraper
+from scrapers.centrecom.centrecom_scraper import CentrecomScraper
 
 from scrapers.umart.umart_scraper_playwright import UmartScraper as UmartPlaywrightScraper
 from scrapers.jwc.jw_computer_scraper_playwright import JWComputersScraper as JWCPlaywrightScraper
-from scrapers.pccg.pc_case_gear_scraper_playwright import PCCaseGearScraper as PCCaseGearPlaywrightScraper 
-from scrapers.scorptec.scorptec_scraper_cloud import ScorptecScraper as ScorptecCloudScraper 
+from scrapers.pccg.pc_case_gear_scraper_playwright import PCCaseGearScraper as PCCaseGearPlaywrightScraper
+from scrapers.scorptec.scorptec_scraper_cloud import ScorptecScraper as ScorptecCloudScraper
+from scrapers.centrecom.centrecom_scraper_playwright import CentrecomScraper as CentrecomPlaywrightScraper 
 
 # Logging configuration
 logging.basicConfig(
@@ -66,28 +65,26 @@ async def scrape_mpn_single(mpn, detailed=False):
 
     logger.info("Starting price scout for MPN=%s", mpn)
 
-    scrapers = [
-        ("Digicor", DigicorScraper()),
-        ("Mwave", MwaveScraper()),
-        ("Center Com", CenterComScraper()),
-        ("Computer Alliance", ComputerAllianceScraper()),
-        ("CPL", CPLScraper())
-    ]
-
     if not detailed:
-        scrapers.extend([
+        scrapers = [
+            ("Digicor", DigicorScraper()),
             ("Scorptec", ScorptecScraper()),
+            ("Mwave", MwaveScraper()),
             ("PC Case Gear", PCCaseGearScraper()),
             ("JW Computers", JWComputersScraper()),
             ("Umart", UmartScraper()),
-        ])
+            ("Centrecom", CentrecomScraper())
+        ]
     else:
-        scrapers.extend([
+        scrapers = [
+            ("Digicor", DigicorScraper()),
             ("Scorptec", ScorptecCloudScraper()),
+            ("Mwave", MwaveScraper()),
             ("PC Case Gear", PCCaseGearPlaywrightScraper()),
             ("JW Computers", JWCPlaywrightScraper()),
             ("Umart", UmartPlaywrightScraper()),
-        ])
+            ("Centrecom", CentrecomPlaywrightScraper())
+        ]
 
     tasks = [scraper.scrape(mpn) for _, scraper in scrapers]  # coroutine objects
     results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -263,7 +260,8 @@ def write_results_to_csv(results, output_path: str):
         'mpn', 'lowest_price', 'lowest_price_vendor', 'lowest_price_url',
         'scorptec_price', 'scorptec_url', 'mwave_price', 'mwave_url',
         'pccasegear_price', 'pccasegear_url', 'jwcomputers_price', 'jwcomputers_url',
-        'umart_price', 'umart_url, digicor_price, digicor_url'
+        'umart_price', 'umart_url', 'digicor_price', 'digicor_url',
+        'centrecom_price', 'centrecom_url'
     ]
 
     with open(output_path, 'w', newline='', encoding='utf-8') as f:
@@ -284,10 +282,8 @@ def write_results_to_csv(results, output_path: str):
                 'PC Case Gear': 'pccasegear',
                 'JW Computers': 'jwcomputers',
                 'Umart': 'umart',
-                "Digicor": 'digicor',
-                "Center Com": 'centercom',
-                "Computer Alliance": 'computeralliance',
-                "CPL": 'cpl'
+                'Digicor': 'digicor',
+                'Centrecom': 'centrecom'
             }
 
             for vendor_name, data in result_dict.items():
