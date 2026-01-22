@@ -25,6 +25,8 @@ from scrapers.jwc.jw_computer_scraper import JWComputersScraper
 from scrapers.umart.umart_scraper import UmartScraper
 from scrapers.digicor_scraper import DigicorScraper
 from scrapers.centrecom.centrecom_scraper import CentrecomScraper
+from scrapers.computeralliance_scraper import ComputerAllianceScraper
+from scrapers.cpl_scraper import CPLScraper
 
 from scrapers.umart.umart_scraper_playwright import UmartScraper as UmartPlaywrightScraper
 from scrapers.jwc.jw_computer_scraper_playwright import JWComputersScraper as JWCPlaywrightScraper
@@ -73,7 +75,9 @@ async def scrape_mpn_single(mpn, detailed=False):
             ("PC Case Gear", PCCaseGearScraper()),
             ("JW Computers", JWComputersScraper()),
             ("Umart", UmartScraper()),
-            ("Centrecom", CentrecomScraper())
+            ("Centrecom", CentrecomScraper()),
+            ("Computer Alliance", ComputerAllianceScraper()),
+            ("CPL", CPLScraper())
         ]
     else:
         scrapers = [
@@ -83,7 +87,9 @@ async def scrape_mpn_single(mpn, detailed=False):
             ("PC Case Gear", PCCaseGearPlaywrightScraper()),
             ("JW Computers", JWCPlaywrightScraper()),
             ("Umart", UmartPlaywrightScraper()),
-            ("Centrecom", CentrecomPlaywrightScraper())
+            ("Centrecom", CentrecomPlaywrightScraper()),
+            ("Computer Alliance", ComputerAllianceScraper()),
+            ("CPL", CPLScraper())
         ]
 
     tasks = [scraper.scrape(mpn) for _, scraper in scrapers]  # coroutine objects
@@ -261,7 +267,8 @@ def write_results_to_csv(results, output_path: str):
         'scorptec_price', 'scorptec_url', 'mwave_price', 'mwave_url',
         'pccasegear_price', 'pccasegear_url', 'jwcomputers_price', 'jwcomputers_url',
         'umart_price', 'umart_url', 'digicor_price', 'digicor_url',
-        'centrecom_price', 'centrecom_url'
+        'centrecom_price', 'centrecom_url', 'computeralliance_price', 'computeralliance_url',
+        'cpl_price', 'cpl_url'
     ]
 
     with open(output_path, 'w', newline='', encoding='utf-8') as f:
@@ -283,7 +290,9 @@ def write_results_to_csv(results, output_path: str):
                 'JW Computers': 'jwcomputers',
                 'Umart': 'umart',
                 'Digicor': 'digicor',
-                'Centrecom': 'centrecom'
+                'Centrecom': 'centrecom',
+                'Computer Alliance': 'computeralliance',
+                'CPL': 'cpl'
             }
 
             for vendor_name, data in result_dict.items():

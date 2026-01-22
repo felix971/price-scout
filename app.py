@@ -20,6 +20,8 @@ Vendors Supported:
     - Umart
     - Digicor
     - Centrecom
+    - Computer Alliance
+    - CPL
 """
 
 import time
@@ -42,7 +44,9 @@ vendor_names = {
     "pc_case_gear": "PC Case Gear",
     "jw_computers": "JW Computers",
     "umart": "Umart",
-    "centrecom": "Centrecom"
+    "centrecom": "Centrecom",
+    "computeralliance": "Computer Alliance",
+    "cpl": "CPL"
 }
 
 

@@ -18,6 +18,8 @@ Supported Vendors:
     - JW Computers
     - Umart
     - Centrecom
+    - Computer Alliance
+    - CPL
 """
 
 import time
@@ -31,6 +33,8 @@ from scrapers.pccg.pc_case_gear_scraper_http import PCCaseGearScraper
 from scrapers.umart.umart_scraper_http import UmartScraper
 from scrapers.jwc.jw_computer_scraper_http import JWComputersScraper
 from scrapers.centrecom.centrecom_scraper_http import CentrecomScraper
+from scrapers.computeralliance_scraper import ComputerAllianceScraper
+from scrapers.cpl_scraper import CPLScraper
 from scraper import read_mpns_from_csv, batch_scrape_mpns, write_results_to_csv
 
 
@@ -89,6 +93,8 @@ async def main():
         ("JW Computers", JWComputersScraper()),
         ("Umart", UmartScraper()),
         ("Centrecom", CentrecomScraper()),
+        ("Computer Alliance", ComputerAllianceScraper()),
+        ("CPL", CPLScraper()),
     ]
 
     if args.mpn:
