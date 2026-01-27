@@ -104,87 +104,102 @@ class ServerSupplyScraper(BaseScraper):
                 # Look for product links with .htm extension
                 product_links = soup.select('a[href*=".htm"]')
 
+                # Look for product links with .htm extension
+                product_links = soup.select('a[href*=".htm"]')
+
                 for link in product_links:
                     href = link.get("href", "")
                     text = link.get_text(strip=True)
 
                     # Check if link contains Part No. with our MPN
-                    if f"Part No. {mpn}" in text or mpn.upper() in text.upper():
-                        return self._extract_product(soup, mpn, href)
+                    if f"Part No. {mpn}" in text or mpn.upper() in text.upper() or mpn.upper() in href.upper():
+                        # Build full URL
+                        if not href.startswith("http"):
+                            product_url = "https://www.serversupply.com" + href
+                        else:
+                            product_url = href
+                        
+                        # Navigate to product page
+                        try:
+                            await page.goto(product_url, wait_until="domcontentloaded", timeout=45000)
+                            prod_html = await page.content()
+                            prod_soup = BeautifulSoup(prod_html, "lxml")
+                            
+                            # Price
+                            price_elem = prod_soup.select_one("span.price") or prod_soup.select_one(".price-wrap .price") or prod_soup.select_one("font[color='red']")
+                            
+                            if not price_elem:
+                                continue
+                                
+                            price_text = price_elem.get_text(strip=True)
+                            price_match = re.search(r'\$?([\d,]+\.?\d*)', price_text)
+                            if not price_match:
+                                continue
+                            price = float(price_match.group(1).replace(',', ''))
+                            
+                            # Stock Status
+                            in_stock = False
+                            stock_msg = "Unknown"
+                            
+                            # Look for availability text
+                            page_text = prod_soup.get_text()
+                            avail_match = re.search(r'Availability:\s*(.+?)(?:\n|$)', page_text, re.IGNORECASE)
+                            
+                            if avail_match:
+                                stock_text = avail_match.group(1).strip()
+                                if "In Stock" in stock_text:
+                                    in_stock = True
+                                    stock_msg = stock_text
+                                    # Try to find quantity if available (rare for server supply, but check)
+                                    qty_match = re.search(r'(\d+)\s+Units', stock_text)
+                                    if qty_match:
+                                        stock_msg = f"{qty_match.group(1)} In Stock"
+                                elif "Out of Stock" in stock_text:
+                                    in_stock = False
+                                    stock_msg = "Out of Stock"
+                                else:
+                                    stock_msg = stock_text
+                            else:
+                                # Fallback checks
+                                if "In Stock" in page_text:
+                                    in_stock = True
+                                    stock_msg = "In Stock"
+                                elif "Out of Stock" in page_text:
+                                    in_stock = False
+                                    stock_msg = "Out of Stock"
+                            
+                            # Condition
+                            condition = "Refurbished" # Default safe assumption for Server Supply
+                            cond_match = re.search(r'Condition:\s*(.+?)(?:\n|$)', page_text, re.IGNORECASE)
+                            if cond_match:
+                                condition = cond_match.group(1).strip()
+                            elif "New" in page_text and "Refurbished" not in page_text:
+                                condition = "New"
+                                
+                            # Append stock to condition as requested
+                            final_condition = f"{condition} ({stock_msg})" if in_stock else condition
 
-                    # Also check if MPN is in the URL
-                    if mpn.upper() in href.upper():
-                        return self._extract_product(soup, mpn, href)
+                            logger.info(f"Server Supply Playwright: Found MPN={mpn}, price=${price}, stock={stock_msg}")
+                            
+                            await browser.close()
+                            return PriceResult(
+                                vendor_id=self.vendor_id,
+                                url=product_url,
+                                mpn=mpn,
+                                price=price,
+                                currency=self.currency,
+                                in_stock=in_stock,
+                                condition=final_condition,
+                                found=True
+                            )
+                            
+                        except Exception as inner_e:
+                            logger.warning(f"Server Supply Playwright: Failed visiting product page {product_url}: {inner_e}")
+                            continue
 
                 logger.info(f"Server Supply Playwright: No exact match found for MPN={mpn}")
+                await browser.close()
                 return self.not_found
-
         except Exception as e:
-            logger.error(f"Server Supply Playwright: Error for MPN={mpn}: {e}")
-            return self.not_found
-
-    def _extract_product(self, soup, mpn: str, product_href: str) -> PriceResult:
-        """
-        Extract product data from search results.
-
-        Args:
-            soup: BeautifulSoup object of the page
-            mpn: The MPN searched for
-            product_href: The product URL path
-
-        Returns:
-            PriceResult with product data or not_found
-        """
-        try:
-            # Build full URL
-            if not product_href.startswith("http"):
-                product_url = "https://www.serversupply.com" + product_href
-            else:
-                product_url = product_href
-
-            # Find price - look for span.price
-            price_elem = soup.select_one("span.price")
-            if not price_elem:
-                price_elem = soup.select_one(".price-wrap .price")
-
-            if not price_elem:
-                logger.warning(f"Server Supply Playwright: No price found for MPN={mpn}")
-                return self.not_found
-
-            price_text = price_elem.get_text(strip=True)
-            # Price format: "$130.00" - remove $ and commas
-            price_match = re.search(r'\$?([\d,]+\.?\d*)', price_text)
-            if not price_match:
-                return self.not_found
-
-            price = float(price_match.group(1).replace(',', ''))
-
-            # Check stock status from description
-            page_text = soup.get_text().lower()
-            in_stock = None
-            if "in stock" in page_text:
-                in_stock = True
-            elif "out of stock" in page_text:
-                in_stock = False
-
-            # Check condition from description
-            condition = "Refurbished"  # Default for Server Supply
-            if "new" in page_text and "refurbished" not in page_text:
-                condition = "New"
-
-            logger.info(f"Server Supply Playwright: Found MPN={mpn}, price=${price}")
-
-            return PriceResult(
-                vendor_id=self.vendor_id,
-                url=product_url,
-                mpn=mpn,
-                price=price,
-                currency=self.currency,
-                in_stock=in_stock,
-                condition=condition,
-                found=True
-            )
-
-        except Exception as e:
-            logger.error(f"Server Supply Playwright: Error extracting product: {e}")
+            logger.exception(f"Server Supply Playwright: Unexpected error for MPN={mpn}: {e}")
             return self.not_found

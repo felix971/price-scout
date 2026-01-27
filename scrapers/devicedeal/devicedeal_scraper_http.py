@@ -87,33 +87,31 @@ class DeviceDealScraper(BaseScraper):
                 soup = BeautifulSoup(resp.text, "lxml")
 
                 # Look for product thumbnails with matching SKU
-                # Device Deal puts SKU in <meta content="SKU"> inside thumbnail
                 thumbnails = soup.select("article.wrapper-thumbnail")
 
-                for thumb in thumbnails:
-                    # Check for SKU match in meta tags
-                    meta_tags = thumb.select("meta[content]")
-                    found_sku = None
+                target = self._normalize(mpn)
 
+                for thumb in thumbnails:
+                    # Method 1: Check meta tags for SKU (normalized)
+                    meta_tags = thumb.select("meta[content]")
                     for meta in meta_tags:
                         content = meta.get("content", "")
-                        if content.upper() == mpn.upper():
-                            found_sku = content
-                            break
+                        if content and self._normalize(content) == target:
+                            return self._extract_product_from_thumbnail(thumb, content)
 
-                    if found_sku:
-                        return self._extract_product_from_thumbnail(thumb, found_sku)
-
-                # Also check the img rel attribute which contains model ID
-                for thumb in thumbnails:
+                    # Method 2: Check img rel attribute
                     img = thumb.select_one("img.product-image")
                     if img:
                         rel = img.get("rel", "")
-                        # rel format: "itmimg{MODEL_ID}"
                         if rel.startswith("itmimg"):
-                            model_id = rel[6:]  # Remove "itmimg" prefix
-                            if model_id.upper() == mpn.upper():
+                            model_id = rel[6:]
+                            if self._normalize(model_id) == target:
                                 return self._extract_product_from_thumbnail(thumb, model_id)
+
+                    # Method 3: Check visible text (title, SKU labels) for MPN
+                    thumb_text = self._normalize(thumb.get_text())
+                    if target in thumb_text:
+                        return self._extract_product_from_thumbnail(thumb, mpn)
 
                 logger.info(f"Device Deal HTTP: No match found for MPN={mpn}")
                 return self.not_found
@@ -121,6 +119,10 @@ class DeviceDealScraper(BaseScraper):
         except Exception as e:
             logger.error(f"Device Deal HTTP: Error for MPN={mpn}: {e}")
             return self.not_found
+
+    @staticmethod
+    def _normalize(value: str) -> str:
+        return re.sub(r'[^A-Za-z0-9]', '', value or '').upper()
 
     def _extract_product_from_thumbnail(self, thumb, found_sku: str) -> PriceResult:
         """
@@ -155,11 +157,15 @@ class DeviceDealScraper(BaseScraper):
                 price_text = price_span.get_text(strip=True)
                 price = float(re.sub(r'[^\d.]', '', price_text))
 
-            # Check for RRP to determine if in stock (if has RRP, likely in stock)
-            rrp = thumb.select_one("span.thumb-rrp")
-            in_stock = None  # Can't determine from thumbnail
+            # Stock status from thumbnail purchase form
+            if thumb.select_one("button.addtocart"):
+                in_stock = True
+            elif thumb.select_one("a.notify_popup"):
+                in_stock = False
+            else:
+                in_stock = None
 
-            logger.info(f"Device Deal HTTP: Found MPN={found_sku}, price=${price}")
+            logger.info(f"Device Deal HTTP: Found MPN={found_sku}, price=${price}, in_stock={in_stock}")
 
             return PriceResult(
                 vendor_id=self.vendor_id,

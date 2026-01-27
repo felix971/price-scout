@@ -111,76 +111,85 @@ class WiredZoneScraper(BaseScraper):
 
                     # Check if MPN is in the product name (case-insensitive)
                     if mpn.upper() in product_name.upper():
-                        return self._extract_product_from_card(card, mpn, product_name)
+                         # Get product URL
+                        url_elem = card.select_one("a[itemprop='url']") or card.select_one("a.product_name")
+                        if not url_elem:
+                            continue
+
+                        product_url = url_elem.get("href", "")
+                        if not product_url.startswith("http"):
+                            product_url = "https://www.wiredzone.com" + product_url
+                        
+                        # Visit product page for details
+                        try:
+                            await page.goto(product_url, wait_until="domcontentloaded", timeout=45000)
+                            prod_html = await page.content()
+                            prod_soup = BeautifulSoup(prod_html, "lxml")
+                            
+                            # Price
+                            price_elem = prod_soup.select_one("span[itemprop='price']") or prod_soup.select_one(".oe_price")
+                            if not price_elem:
+                                continue
+                            
+                            try:
+                                price = float(price_elem.get_text(strip=True).replace("$","").replace(",",""))
+                            except ValueError:
+                                continue
+
+                            # Detailed Stock
+                            stock_msg = "Unknown"
+                            in_stock = False
+                            
+                            # WiredZone specific stock structure
+                            availability_div = prod_soup.select_one("#product_availability") or prod_soup.select_one(".availability_message")
+                            
+                            if availability_div:
+                                stock_text = availability_div.get_text(strip=True)
+                                if "In Stock" in stock_text:
+                                    in_stock = True
+                                    # Try to find quantity number
+                                    import re
+                                    qty_match = re.search(r'(\d+)\s+Units', stock_text, re.IGNORECASE)
+                                    if qty_match:
+                                        stock_msg = f"{qty_match.group(1)} In Stock"
+                                    else:
+                                        stock_msg = "In Stock"
+                                elif "Drop Ship" in stock_text:
+                                    in_stock = True # Still purchasable
+                                    stock_msg = "MFG Drop Ship"
+                                elif "Out of Stock" in stock_text:
+                                    in_stock = False
+                                    stock_msg = "Out of Stock"
+                                else:
+                                    stock_msg = stock_text
+                            
+                            # Condition (WiredZone is mostly New, but good to label)
+                            condition = "New" 
+                            # If there was a condition field, we'd scrape it here. 
+                            # Appending stock status to condition for visibility as requested
+                            final_condition = f"{condition} ({stock_msg})" if in_stock else condition
+
+                            logger.info(f"Wired Zone Playwright: Found MPN={mpn}, price=${price}, stock={stock_msg}")
+                            
+                            await browser.close()
+                            return PriceResult(
+                                vendor_id=self.vendor_id,
+                                url=product_url,
+                                mpn=mpn,
+                                price=price,
+                                currency=self.currency,
+                                in_stock=in_stock,
+                                condition=final_condition,
+                                found=True
+                            )
+                            
+                        except Exception as inner_e:
+                            logger.warning(f"Wired Zone Playwright: Failed visiting product page {product_url}: {inner_e}")
+                            continue
 
                 logger.info(f"Wired Zone Playwright: No exact match found for MPN={mpn}")
+                await browser.close()
                 return self.not_found
-
         except Exception as e:
             logger.error(f"Wired Zone Playwright: Error for MPN={mpn}: {e}")
-            return self.not_found
-
-    def _extract_product_from_card(self, card, mpn: str, product_name: str) -> PriceResult:
-        """
-        Extract product data from a product card.
-
-        Args:
-            card: BeautifulSoup element of the product card
-            mpn: The MPN searched for
-            product_name: The product name found
-
-        Returns:
-            PriceResult with product data or not_found
-        """
-        try:
-            # Get product URL
-            url_elem = card.select_one("a[itemprop='url']")
-            if not url_elem:
-                url_elem = card.select_one("a.product_name")
-
-            if not url_elem:
-                return self.not_found
-
-            product_url = url_elem.get("href", "")
-            if not product_url.startswith("http"):
-                product_url = "https://www.wiredzone.com" + product_url
-
-            # Get price from itemprop="price"
-            price_elem = card.select_one("span[itemprop='price']")
-            if not price_elem:
-                return self.not_found
-
-            price_text = price_elem.get_text(strip=True)
-            try:
-                price = float(price_text)
-            except ValueError:
-                logger.warning(f"Wired Zone Playwright: Could not parse price '{price_text}'")
-                return self.not_found
-
-            # Check stock status
-            stock_elem = card.select_one(".website_stock_status")
-            in_stock = None
-            if stock_elem:
-                stock_text = stock_elem.get_text(strip=True).lower()
-                if "in stock" in stock_text:
-                    in_stock = True
-                elif "out of stock" in stock_text:
-                    in_stock = False
-                # "MFG Drop Ship" means available via manufacturer
-
-            logger.info(f"Wired Zone Playwright: Found MPN={mpn}, price=${price}")
-
-            return PriceResult(
-                vendor_id=self.vendor_id,
-                url=product_url,
-                mpn=mpn,
-                price=price,
-                currency=self.currency,
-                in_stock=in_stock,
-                condition="New",
-                found=True
-            )
-
-        except Exception as e:
-            logger.error(f"Wired Zone Playwright: Error extracting product: {e}")
             return self.not_found

@@ -238,6 +238,16 @@ with tab_single:
 # TAB 2: CSV BATCH PROCESSING
 with tab_batch:
     st.markdown("### 📄 Upload & Manage Batch")
+    batch_scrape_mode = st.radio(
+        "Scrape Mode:",
+        options=["Fast", "More Info"],
+        horizontal=True,
+        help="Fast uses HTTP scrapers for speed. More Info switches to Playwright-only scrapers to capture stock status and condition."
+    )
+
+    if batch_scrape_mode == "Fast":
+        st.info("For full stock availability details choose More Info mode (slower).", icon="ℹ️")
+
     uploaded_file = st.file_uploader("Upload CSV", type=['csv'])
 
     if uploaded_file is not None:
@@ -270,12 +280,15 @@ with tab_batch:
             if st.button("🚀 Start Batch Search", type="primary"):
                 progress_bar = st.progress(0)
                 all_results = []
+                display_results_list = []
                 successful_count = 0
+                vendor_rows = []
                 start_time = time.time()
+                detailed_batch = (batch_scrape_mode == "More Info")
 
                 for i, mpn in enumerate(mpns_to_scan):
                     progress_bar.progress((i + 1) / len(mpns_to_scan))
-                    results = asyncio.run(scrape_mpn_single(mpn))
+                    results = asyncio.run(scrape_mpn_single(mpn, detailed_batch))
 
                     # Process and save results to database
                     for res in results:
@@ -292,14 +305,59 @@ with tab_batch:
                     lowest_price = min(prices) if prices else None
 
                     for res in results:
-                        mpn_result[f'{vendor_names[res.vendor_id]} Price'] = (
-                            float(res.price) if res.price else None
-                        )
+                        vendor_display_name = vendor_names.get(res.vendor_id, res.vendor_id)
+                        price_value = float(res.price) if res.price else None
+                        mpn_result[f'{vendor_display_name} Price'] = price_value
+                        mpn_result[f'{vendor_display_name} Status'] = "✅" if res.found else "❌"
+
+                        if detailed_batch:
+                            stock_value = (
+                                "✅ In Stock" if res.in_stock
+                                else ("❌ Out of Stock" if res.in_stock is False else "Unknown")
+                            )
+                            mpn_result[f'{vendor_display_name} Stock'] = stock_value
+                            mpn_result[f'{vendor_display_name} Condition'] = res.condition or "Unknown"
+                        vendor_rows.append({
+                            'MPN': mpn,
+                            'Vendor': vendor_display_name,
+                            'Price': price_value,
+                            'Found': "✅" if res.found else "❌",
+                            'In Stock': "✅" if res.in_stock else ("❌" if res.in_stock is False else "N/A"),
+                            'Condition': res.condition if res.condition else None,
+                            'URL': str(res.url) if res.url else None
+                        })
+
+                    # Build display-friendly dictionary (one column per vendor with status icons)
+                    display_result = {'MPN': mpn, 'Best Price': lowest_price}
+                    
+                    for res in results:
+                        vendor_display_name = vendor_names.get(res.vendor_id, res.vendor_id)
+                        
+                        if not res.found or res.price is None:
+                            display_val = "—"
+                        else:
+                            price_str = f"${float(res.price):.2f}"
+                            
+                            if detailed_batch:
+                                if res.in_stock is True:
+                                    status_icon = "🟢" # In Stock
+                                elif res.in_stock is False:
+                                    status_icon = "🔴" # Out of Stock
+                                else:
+                                    status_icon = "❓" # Unknown stock
+                            else:
+                                status_icon = "" # Fast mode, no stock info
+                                
+                            display_val = f"{price_str} {status_icon}".strip()
+                        
+                        display_result[vendor_display_name] = display_val
 
                     mpn_result['Best Price'] = lowest_price
-                    if lowest_price:
+                    if lowest_price is not None:
                         successful_count += 1
-                    all_results.append(mpn_result)
+
+                    all_results.append(mpn_result) # Keep detailed for CSV
+                    display_results_list.append(display_result) # For UI
 
                 elapsed_time = time.time() - start_time
                 success_rate = (successful_count / len(mpns_to_scan) * 100)
@@ -318,39 +376,86 @@ with tab_batch:
                 with c4:
                     render_custom_metric("Time Taken", f"{elapsed_time:.1f}s", "#757575")
 
-                # Results table with best price highlighting
-                df_final = pd.DataFrame(all_results)
-
-                # Reorder to put critical info at the front
-                main_cols = ['MPN', 'Best Price']
-                other_cols = [c for c in df_final.columns if c not in main_cols]
-                df_final = df_final[main_cols + other_cols]
-
-                def highlight_best_price(row):
-                    """Highlight the best price in each row with green background."""
-                    styles = []
-                    for col in row.index:
-                        # Only apply to vendor price columns
-                        if col.endswith('Price') and row[col] == row.get('Best Price'):
-                            styles.append('background-color: #A7F3D0; color: #064E3B; font-weight: bold')
-                        else:
-                            styles.append('')  # default
-                    return styles
-
+                # --- UI DISPLAY: COMPACT MATRIX ---
                 st.markdown("### 📋 Comparative Results")
-                st.dataframe(
-                    df_final.style.apply(highlight_best_price, axis=1)
-                            .format(precision=2, na_rep="-",
-                                    subset=[c for c in df_final.columns if 'price' in c.lower()]),
-                    width='stretch'
-                )
+                st.caption("🟢 In Stock | 🔴 Out of Stock | ❓ Unknown Status")
+                
+                df_display = pd.DataFrame(display_results_list)
+                
+                # Reorder columns: MPN, Best Price, then Vendors alphabetically
+                if not df_display.empty:
+                    cols = list(df_display.columns)
+                    fixed_cols = ['MPN', 'Best Price']
+                    vendor_cols = sorted([c for c in cols if c not in fixed_cols])
+                    df_display = df_display[fixed_cols + vendor_cols]
 
-                st.download_button(
-                    "📥 Export Results",
-                    df_final.to_csv(index=False),
-                    "results.csv",
-                    "text/csv"
-                )
+                    def highlight_best_price_display(row):
+                        """Highlight the best price in the display dataframe."""
+                        styles = []
+                        best_val = row.get('Best Price')
+                        
+                        for col in row.index:
+                            cell_val = str(row[col])
+                            # Check if this cell represents the best price
+                            if col not in ['MPN', 'Best Price'] and best_val is not None:
+                                # Extract numeric part from string "$100.00 🟢"
+                                try:
+                                    # Simple check: does the cell start with the formatted best price?
+                                    if cell_val.startswith(f"${best_val:.2f}"):
+                                        styles.append('background-color: #A7F3D0; color: #064E3B; font-weight: bold')
+                                    else:
+                                        styles.append('')
+                                except:
+                                    styles.append('')
+                            else:
+                                styles.append('')
+                        return styles
+
+                    st.dataframe(
+                        df_display.style.apply(highlight_best_price_display, axis=1)
+                                  .format(precision=2, subset=['Best Price'], na_rep="-"),
+                        width='stretch',
+                        hide_index=True
+                    )
+                else:
+                    st.warning("No results to display.")
+
+                # --- EXPORT SECTION ---
+                col_exp1, col_exp2 = st.columns(2)
+                
+                # Prepare detailed CSV for export (keep all technical columns)
+                df_export = pd.DataFrame(all_results)
+                
+                with col_exp1:
+                    st.download_button(
+                        "📥 Export Detailed Results (CSV)",
+                        df_export.to_csv(index=False),
+                        "results_detailed.csv",
+                        "text/csv",
+                        help="Includes separate columns for Price, Stock, Condition, and URLs."
+                    )
+                
+                if vendor_rows:
+                    df_vendor = pd.DataFrame(vendor_rows)
+                    with col_exp2:
+                         st.download_button(
+                            "📥 Export Vendor Availability (CSV)",
+                            df_vendor.to_csv(index=False),
+                            "vendor_availability.csv",
+                            "text/csv",
+                            help="Long-format table with every found MPN/Vendor combination."
+                        )
+                    
+                    with st.expander("View Raw Vendor Availability Data"):
+                         st.dataframe(
+                            df_vendor,
+                            column_config={
+                                "Price": st.column_config.NumberColumn(format="$%.2f"),
+                                "URL": st.column_config.LinkColumn(label="Link", display_text="Link")
+                            },
+                            width='stretch',
+                            hide_index=True
+                        )
 
 # TAB 3: ANALYTICS
 with tab_analytics:
