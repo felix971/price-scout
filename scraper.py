@@ -28,13 +28,23 @@ from scrapers.centrecom.centrecom_scraper import CentrecomScraper
 from scrapers.computeralliance_scraper import ComputerAllianceScraper
 from scrapers.cpl_scraper import CPLScraper
 from scrapers.devicedeal.devicedeal_scraper import DeviceDealScraper
+from scrapers.pbtech.pbtech_scraper import PBTechScraper
+from scrapers.wiredzone.wiredzone_scraper import WiredZoneScraper
+from scrapers.ple.ple_scraper import PLEScraper
+from scrapers.serversupply.serversupply_scraper import ServerSupplyScraper
+from scrapers.ebay.ebay_scraper import EbayScraper
 
 from scrapers.umart.umart_scraper_playwright import UmartScraper as UmartPlaywrightScraper
 from scrapers.jwc.jw_computer_scraper_playwright import JWComputersScraper as JWCPlaywrightScraper
 from scrapers.pccg.pc_case_gear_scraper_playwright import PCCaseGearScraper as PCCaseGearPlaywrightScraper
 from scrapers.scorptec.scorptec_scraper_cloud import ScorptecScraper as ScorptecCloudScraper
 from scrapers.centrecom.centrecom_scraper_playwright import CentrecomScraper as CentrecomPlaywrightScraper
-from scrapers.devicedeal.devicedeal_scraper_playwright import DeviceDealScraper as DeviceDealPlaywrightScraper 
+from scrapers.devicedeal.devicedeal_scraper_playwright import DeviceDealScraper as DeviceDealPlaywrightScraper
+from scrapers.pbtech.pbtech_scraper_playwright import PBTechScraper as PBTechPlaywrightScraper
+from scrapers.wiredzone.wiredzone_scraper_playwright import WiredZoneScraper as WiredZonePlaywrightScraper
+from scrapers.ple.ple_scraper_playwright import PLEScraper as PLEPlaywrightScraper
+from scrapers.serversupply.serversupply_scraper_playwright import ServerSupplyScraper as ServerSupplyPlaywrightScraper
+from scrapers.ebay.ebay_scraper_playwright import EbayScraper as EbayPlaywrightScraper
 
 # Logging configuration
 logging.basicConfig(
@@ -80,7 +90,12 @@ async def scrape_mpn_single(mpn, detailed=False):
             ("Centrecom", CentrecomScraper()),
             ("Computer Alliance", ComputerAllianceScraper()),
             ("CPL", CPLScraper()),
-            ("Device Deal", DeviceDealScraper())
+            ("Device Deal", DeviceDealScraper()),
+            ("PB Tech", PBTechScraper()),
+            ("Wired Zone", WiredZoneScraper()),
+            ("PLE", PLEScraper()),
+            ("Server Supply", ServerSupplyScraper()),
+            ("eBay AU", EbayScraper())
         ]
     else:
         scrapers = [
@@ -93,7 +108,12 @@ async def scrape_mpn_single(mpn, detailed=False):
             ("Centrecom", CentrecomPlaywrightScraper()),
             ("Computer Alliance", ComputerAllianceScraper()),
             ("CPL", CPLScraper()),
-            ("Device Deal", DeviceDealPlaywrightScraper())
+            ("Device Deal", DeviceDealPlaywrightScraper()),
+            ("PB Tech", PBTechPlaywrightScraper()),
+            ("Wired Zone", WiredZonePlaywrightScraper()),
+            ("PLE", PLEPlaywrightScraper()),
+            ("Server Supply", ServerSupplyPlaywrightScraper()),
+            ("eBay AU", EbayPlaywrightScraper())
         ]
 
     tasks = [scraper.scrape(mpn) for _, scraper in scrapers]  # coroutine objects
@@ -209,9 +229,9 @@ async def batch_scrape_mpns(mpns: List[str], scrapers):
         >>> for mpn, vendor_results in results:
         ...     print(f"{mpn}: {len(vendor_results)} vendors checked")
     """
-    # Limit concurrency to 5 MPNs at a time to avoid rate limiting
-    # (Since each MPN triggers 5 internal requests, this equals ~25 total concurrent connections)
-    semaphore = asyncio.Semaphore(5)
+    # Limit concurrency to 15 MPNs at a time (matches vendor count)
+    # (Since each MPN triggers 15 vendor requests, this equals ~225 total concurrent connections)
+    semaphore = asyncio.Semaphore(15)
 
     async def bounded_scrape(index, mpn):
         """Helper to wrap scraping with semaphore control."""
@@ -272,7 +292,12 @@ def write_results_to_csv(results, output_path: str):
         'pccasegear_price', 'pccasegear_url', 'jwcomputers_price', 'jwcomputers_url',
         'umart_price', 'umart_url', 'digicor_price', 'digicor_url',
         'centrecom_price', 'centrecom_url', 'computeralliance_price', 'computeralliance_url',
-        'cpl_price', 'cpl_url', 'devicedeal_price', 'devicedeal_url'
+        'cpl_price', 'cpl_url', 'devicedeal_price', 'devicedeal_url',
+        'pbtech_price', 'pbtech_url',
+        'wiredzone_price', 'wiredzone_url',
+        'ple_price', 'ple_url',
+        'serversupply_price', 'serversupply_url',
+        'ebay_au_price', 'ebay_au_url'
     ]
 
     with open(output_path, 'w', newline='', encoding='utf-8') as f:
@@ -297,7 +322,12 @@ def write_results_to_csv(results, output_path: str):
                 'Centrecom': 'centrecom',
                 'Computer Alliance': 'computeralliance',
                 'CPL': 'cpl',
-                'Device Deal': 'devicedeal'
+                'Device Deal': 'devicedeal',
+                'PB Tech': 'pbtech',
+                'Wired Zone': 'wiredzone',
+                'PLE': 'ple',
+                'Server Supply': 'serversupply',
+                'eBay AU': 'ebay_au'
             }
 
             for vendor_name, data in result_dict.items():

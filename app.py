@@ -23,6 +23,11 @@ Vendors Supported:
     - Computer Alliance
     - CPL
     - Device Deal
+    - PB Tech
+    - Wired Zone
+    - PLE Computers
+    - Server Supply
+    - eBay Australia
 """
 
 import time
@@ -48,7 +53,12 @@ vendor_names = {
     "centrecom": "Centrecom",
     "computeralliance": "Computer Alliance",
     "cpl": "CPL",
-    "devicedeal": "Device Deal"
+    "devicedeal": "Device Deal",
+    "pbtech": "PB Tech",
+    "wiredzone": "Wired Zone",
+    "ple": "PLE Computers",
+    "serversupply": "Server Supply",
+    "ebay_au": "eBay Australia"
 }
 
 

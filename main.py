@@ -21,6 +21,11 @@ Supported Vendors:
     - Computer Alliance
     - CPL
     - Device Deal
+    - PB Tech
+    - Wired Zone
+    - PLE Computers
+    - Server Supply
+    - eBay Australia
 """
 
 import time
@@ -37,6 +42,11 @@ from scrapers.centrecom.centrecom_scraper_http import CentrecomScraper
 from scrapers.computeralliance_scraper import ComputerAllianceScraper
 from scrapers.cpl_scraper import CPLScraper
 from scrapers.devicedeal.devicedeal_scraper_http import DeviceDealScraper
+from scrapers.pbtech.pbtech_scraper_http import PBTechScraper
+from scrapers.wiredzone.wiredzone_scraper_http import WiredZoneScraper
+from scrapers.ple.ple_scraper_http import PLEScraper
+from scrapers.serversupply.serversupply_scraper_http import ServerSupplyScraper
+from scrapers.ebay.ebay_scraper_http import EbayScraper
 from scraper import read_mpns_from_csv, batch_scrape_mpns, write_results_to_csv
 
 
@@ -98,6 +108,11 @@ async def main():
         ("Computer Alliance", ComputerAllianceScraper()),
         ("CPL", CPLScraper()),
         ("Device Deal", DeviceDealScraper()),
+        ("PB Tech", PBTechScraper()),
+        ("Wired Zone", WiredZoneScraper()),
+        ("PLE", PLEScraper()),
+        ("Server Supply", ServerSupplyScraper()),
+        ("eBay AU", EbayScraper()),
     ]
 
     if args.mpn:
