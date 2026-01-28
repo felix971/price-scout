@@ -230,9 +230,9 @@ async def batch_scrape_mpns(mpns: List[str], scrapers):
         >>> for mpn, vendor_results in results:
         ...     print(f"{mpn}: {len(vendor_results)} vendors checked")
     """
-    # Limit concurrency to 15 MPNs at a time (matches vendor count)
-    # (Since each MPN triggers 15 vendor requests, this equals ~225 total concurrent connections)
-    semaphore = asyncio.Semaphore(15)
+    # Limit concurrency to 16 MPNs at a time (matches vendor count)
+    # (Since each MPN triggers 16 internal requests, this equals ~256 total concurrent connections)
+    semaphore = asyncio.Semaphore(16)
 
     async def bounded_scrape(index, mpn):
         """Helper to wrap scraping with semaphore control."""
