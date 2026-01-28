@@ -75,7 +75,7 @@ class AmazonScraper(BaseScraper):
                 try:
                     await page.goto(
                         search_url,
-                        wait_until="networkidle",
+                        wait_until="domcontentloaded",
                         timeout=45000
                     )
                 except Exception as nav_error:
@@ -83,7 +83,11 @@ class AmazonScraper(BaseScraper):
                     await browser.close()
                     return self.not_found
 
-                await asyncio.sleep(2)
+                # Wait for JS-rendered search results
+                try:
+                    await page.wait_for_selector('[data-component-type="s-search-result"]', timeout=10000)
+                except Exception:
+                    await asyncio.sleep(3)
 
                 html = await page.content()
                 soup = BeautifulSoup(html, "lxml")
@@ -95,34 +99,48 @@ class AmazonScraper(BaseScraper):
                     await browser.close()
                     return self.not_found
 
-                # Check each result
+                # Collect all matching results, then return cheapest
+                candidates = []
+
                 for result in results[:5]:
                     asin = result.get("data-asin", "")
                     if not asin:
                         continue
 
-                    # Check if MPN appears in title
-                    title_elem = result.select_one("h2 span.a-text-normal")
+                    # Check if MPN appears in title (quick filter)
+                    mpn_in_title = False
+                    title_elem = result.select_one("h2 span")
                     if title_elem:
                         title = title_elem.get_text(strip=True)
-                        if mpn.upper() in title.upper():
-                            price_result = self._extract_from_search_result(result, mpn, asin)
-                            if price_result.found:
-                                await browser.close()
-                                return price_result
+                        mpn_in_title = mpn.upper() in title.upper()
 
-                    # Visit product page to validate MPN
+                    # Visit product page — title match confirms MPN, otherwise validate on page
                     product_url = f"https://www.amazon.com.au/dp/{asin}"
                     try:
-                        await page.goto(product_url, wait_until="networkidle", timeout=30000)
-                        await asyncio.sleep(1)
+                        await page.goto(product_url, wait_until="domcontentloaded", timeout=30000)
+                        try:
+                            await page.wait_for_selector('#productTitle', timeout=8000)
+                        except Exception:
+                            await asyncio.sleep(3)
                         product_html = await page.content()
-                        product_result = self._extract_from_product_page(product_html, mpn, product_url)
+                        product_result = self._extract_from_product_page(
+                            product_html, mpn, product_url, skip_validation=mpn_in_title
+                        )
                         if product_result.found:
-                            await browser.close()
-                            return product_result
+                            candidates.append(product_result)
                     except Exception:
+                        # Fallback: use search result price if product page fails
+                        if mpn_in_title:
+                            sr_result = self._extract_from_search_result(result, mpn, asin)
+                            if sr_result.found:
+                                candidates.append(sr_result)
                         continue
+
+                if candidates:
+                    best = min(candidates, key=lambda r: r.price)
+                    logger.info(f"Amazon AU Playwright: Best price for MPN={mpn}: ${best.price} from {len(candidates)} candidates")
+                    await browser.close()
+                    return best
 
                 logger.info(f"Amazon AU Playwright: No exact match found for MPN={mpn}")
                 await browser.close()
@@ -135,12 +153,23 @@ class AmazonScraper(BaseScraper):
     def _extract_from_search_result(self, result, mpn: str, asin: str) -> PriceResult:
         """Extract product data from search result."""
         try:
-            price_elem = result.select_one("span.a-price span.a-offscreen")
-            if not price_elem:
-                return self.not_found
+            price = None
 
-            price_text = price_elem.get_text(strip=True)
-            price = self._parse_price(price_text)
+            # Method 1: Standard Buy Box price
+            price_elem = result.select_one("span.a-price span.a-offscreen")
+            if price_elem:
+                price = self._parse_price(price_elem.get_text(strip=True))
+
+            # Method 2: Non-featured offer price ("No featured offers available" + price)
+            if price is None:
+                no_featured = result.find(string=lambda s: s and "no featured" in s.lower())
+                if no_featured:
+                    container = no_featured.find_parent("div")
+                    if container:
+                        price_span = container.select_one("span.a-color-base")
+                        if price_span:
+                            price = self._parse_price(price_span.get_text(strip=True))
+
             if price is None:
                 return self.not_found
 
@@ -163,13 +192,13 @@ class AmazonScraper(BaseScraper):
             logger.error(f"Amazon AU Playwright: Error extracting from search: {e}")
             return self.not_found
 
-    def _extract_from_product_page(self, html: str, mpn: str, product_url: str) -> PriceResult:
+    def _extract_from_product_page(self, html: str, mpn: str, product_url: str, skip_validation: bool = False) -> PriceResult:
         """Extract product data from product page."""
         try:
             soup = BeautifulSoup(html, "lxml")
 
-            # Validate MPN
-            if not self._validate_mpn(soup, mpn):
+            # Validate MPN (skip if already confirmed by title match)
+            if not skip_validation and not self._validate_mpn(soup, mpn):
                 return self.not_found
 
             # Extract price

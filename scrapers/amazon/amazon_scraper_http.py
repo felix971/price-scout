@@ -89,27 +89,38 @@ class AmazonScraper(BaseScraper):
                     logger.info(f"Amazon AU HTTP: No search results for MPN={mpn}")
                     return self.not_found
 
-                # 3. Check each result for MPN match
+                # 3. Check each result for MPN match, collect all candidates
+                candidates = []
+
                 for result in results[:5]:  # Check first 5 results
                     asin = result.get("data-asin", "")
                     if not asin:
                         continue
 
-                    # Check if MPN appears in title
-                    title_elem = result.select_one("h2 span.a-text-normal")
+                    # Check if MPN appears in title (quick filter)
+                    mpn_in_title = False
+                    title_elem = result.select_one("h2 span")
                     if title_elem:
                         title = title_elem.get_text(strip=True)
-                        if mpn.upper() in title.upper():
-                            # Get price from search result
-                            price_result = self._extract_from_search_result(result, mpn, asin)
-                            if price_result.found:
-                                return price_result
+                        mpn_in_title = mpn.upper() in title.upper()
 
-                    # Visit product page to validate MPN
+                    # Visit product page — title match confirms MPN, otherwise validate on page
                     product_url = f"https://www.amazon.com.au/dp/{asin}"
-                    product_result = await self._scrape_product_page(s, headers, product_url, mpn)
+                    product_result = await self._scrape_product_page(
+                        s, headers, product_url, mpn, skip_validation=mpn_in_title
+                    )
                     if product_result.found:
-                        return product_result
+                        candidates.append(product_result)
+                    elif mpn_in_title:
+                        # Fallback: use search result price if product page fails
+                        sr_result = self._extract_from_search_result(result, mpn, asin)
+                        if sr_result.found:
+                            candidates.append(sr_result)
+
+                if candidates:
+                    best = min(candidates, key=lambda r: r.price)
+                    logger.info(f"Amazon AU HTTP: Best price for MPN={mpn}: ${best.price} from {len(candidates)} candidates")
+                    return best
 
                 logger.info(f"Amazon AU HTTP: No exact match found for MPN={mpn}")
                 return self.not_found
@@ -131,13 +142,23 @@ class AmazonScraper(BaseScraper):
             PriceResult with product data or not_found
         """
         try:
-            # Get price
-            price_elem = result.select_one("span.a-price span.a-offscreen")
-            if not price_elem:
-                return self.not_found
+            price = None
 
-            price_text = price_elem.get_text(strip=True)
-            price = self._parse_price(price_text)
+            # Method 1: Standard Buy Box price
+            price_elem = result.select_one("span.a-price span.a-offscreen")
+            if price_elem:
+                price = self._parse_price(price_elem.get_text(strip=True))
+
+            # Method 2: Non-featured offer price ("No featured offers available" + price)
+            if price is None:
+                no_featured = result.find(string=lambda s: s and "no featured" in s.lower())
+                if no_featured:
+                    container = no_featured.find_parent("div")
+                    if container:
+                        price_span = container.select_one("span.a-color-base")
+                        if price_span:
+                            price = self._parse_price(price_span.get_text(strip=True))
+
             if price is None:
                 return self.not_found
 
@@ -151,7 +172,7 @@ class AmazonScraper(BaseScraper):
                 mpn=mpn,
                 price=price,
                 currency=self.currency,
-                in_stock=True,  # Assume in stock if in search results
+                in_stock=True,
                 condition="New",
                 found=True
             )
@@ -161,7 +182,8 @@ class AmazonScraper(BaseScraper):
             return self.not_found
 
     async def _scrape_product_page(
-        self, session: AsyncSession, headers: dict, product_url: str, mpn: str
+        self, session: AsyncSession, headers: dict, product_url: str, mpn: str,
+        skip_validation: bool = False
     ) -> PriceResult:
         """
         Scrape product page to validate MPN and extract price.
@@ -171,6 +193,7 @@ class AmazonScraper(BaseScraper):
             headers: Request headers
             product_url: URL of the product page
             mpn: Manufacturer Part Number to validate
+            skip_validation: Skip MPN validation (already confirmed by title match)
 
         Returns:
             PriceResult with product data if MPN matches, otherwise not_found
@@ -188,8 +211,8 @@ class AmazonScraper(BaseScraper):
 
             soup = BeautifulSoup(resp.text, "lxml")
 
-            # Validate MPN in product details
-            if not self._validate_mpn(soup, mpn):
+            # Validate MPN in product details (skip if already confirmed by title)
+            if not skip_validation and not self._validate_mpn(soup, mpn):
                 return self.not_found
 
             # Extract price

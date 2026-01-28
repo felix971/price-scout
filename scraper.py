@@ -33,6 +33,7 @@ from scrapers.wiredzone.wiredzone_scraper import WiredZoneScraper
 from scrapers.ple.ple_scraper import PLEScraper
 from scrapers.serversupply.serversupply_scraper import ServerSupplyScraper
 from scrapers.ebay.ebay_scraper import EbayScraper
+from scrapers.amazon.amazon_scraper import AmazonScraper
 
 from scrapers.umart.umart_scraper_playwright import UmartScraper as UmartPlaywrightScraper
 from scrapers.jwc.jw_computer_scraper_playwright import JWComputersScraper as JWCPlaywrightScraper
@@ -45,6 +46,7 @@ from scrapers.wiredzone.wiredzone_scraper_playwright import WiredZoneScraper as 
 from scrapers.ple.ple_scraper_playwright import PLEScraper as PLEPlaywrightScraper
 from scrapers.serversupply.serversupply_scraper_playwright import ServerSupplyScraper as ServerSupplyPlaywrightScraper
 from scrapers.ebay.ebay_scraper_playwright import EbayScraper as EbayPlaywrightScraper
+from scrapers.amazon.amazon_scraper_playwright import AmazonScraper as AmazonPlaywrightScraper
 
 # Logging configuration
 logging.basicConfig(
@@ -95,7 +97,8 @@ async def scrape_mpn_single(mpn, detailed=False):
             ("Wired Zone", WiredZoneScraper()),
             ("PLE", PLEScraper()),
             ("Server Supply", ServerSupplyScraper()),
-            ("eBay AU", EbayScraper())
+            ("eBay AU", EbayScraper()),
+            ("Amazon AU", AmazonScraper())
         ]
     else:
         scrapers = [
@@ -113,7 +116,8 @@ async def scrape_mpn_single(mpn, detailed=False):
             ("Wired Zone", WiredZonePlaywrightScraper()),
             ("PLE", PLEPlaywrightScraper()),
             ("Server Supply", ServerSupplyPlaywrightScraper()),
-            ("eBay AU", EbayPlaywrightScraper())
+            ("eBay AU", EbayPlaywrightScraper()),
+            ("Amazon AU", AmazonPlaywrightScraper())
         ]
 
     tasks = [scraper.scrape(mpn) for _, scraper in scrapers]  # coroutine objects
@@ -297,7 +301,8 @@ def write_results_to_csv(results, output_path: str):
         'wiredzone_price', 'wiredzone_url',
         'ple_price', 'ple_url',
         'serversupply_price', 'serversupply_url',
-        'ebay_au_price', 'ebay_au_url'
+        'ebay_au_price', 'ebay_au_url',
+        'amazon_au_price', 'amazon_au_url'
     ]
 
     with open(output_path, 'w', newline='', encoding='utf-8') as f:
@@ -327,7 +332,8 @@ def write_results_to_csv(results, output_path: str):
                 'Wired Zone': 'wiredzone',
                 'PLE': 'ple',
                 'Server Supply': 'serversupply',
-                'eBay AU': 'ebay_au'
+                'eBay AU': 'ebay_au',
+                'Amazon AU': 'amazon_au'
             }
 
             for vendor_name, data in result_dict.items():

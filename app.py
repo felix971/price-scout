@@ -58,7 +58,8 @@ vendor_names = {
     "wiredzone": "Wired Zone",
     "ple": "PLE Computers",
     "serversupply": "Server Supply",
-    "ebay_au": "eBay Australia"
+    "ebay_au": "eBay Australia",
+    "amazon_au": "Amazon Australia"
 }
 
 
