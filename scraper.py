@@ -40,11 +40,8 @@ from scrapers.jwc.jw_computer_scraper_playwright import JWComputersScraper as JW
 from scrapers.pccg.pc_case_gear_scraper_playwright import PCCaseGearScraper as PCCaseGearPlaywrightScraper
 from scrapers.scorptec.scorptec_scraper_cloud import ScorptecScraper as ScorptecCloudScraper
 from scrapers.centrecom.centrecom_scraper_playwright import CentrecomScraper as CentrecomPlaywrightScraper
-from scrapers.devicedeal.devicedeal_scraper_playwright import DeviceDealScraper as DeviceDealPlaywrightScraper
 from scrapers.pbtech.pbtech_scraper_playwright import PBTechScraper as PBTechPlaywrightScraper
-from scrapers.wiredzone.wiredzone_scraper_playwright import WiredZoneScraper as WiredZonePlaywrightScraper
 from scrapers.ple.ple_scraper_playwright import PLEScraper as PLEPlaywrightScraper
-from scrapers.serversupply.serversupply_scraper_playwright import ServerSupplyScraper as ServerSupplyPlaywrightScraper
 from scrapers.ebay.ebay_scraper_playwright import EbayScraper as EbayPlaywrightScraper
 from scrapers.amazon.amazon_scraper_playwright import AmazonScraper as AmazonPlaywrightScraper
 
@@ -111,11 +108,11 @@ async def scrape_mpn_single(mpn, detailed=False):
             ("Centrecom", CentrecomPlaywrightScraper()),
             ("Computer Alliance", ComputerAllianceScraper()),
             ("CPL", CPLScraper()),
-            ("Device Deal", DeviceDealPlaywrightScraper()),
+            ("Device Deal", DeviceDealScraper()),
             ("PB Tech", PBTechPlaywrightScraper()),
-            ("Wired Zone", WiredZonePlaywrightScraper()),
+            ("Wired Zone", WiredZoneScraper()),
             ("PLE", PLEPlaywrightScraper()),
-            ("Server Supply", ServerSupplyPlaywrightScraper()),
+            ("Server Supply", ServerSupplyScraper()),
             ("eBay AU", EbayPlaywrightScraper()),
             ("Amazon AU", AmazonPlaywrightScraper())
         ]
