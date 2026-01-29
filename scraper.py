@@ -164,7 +164,7 @@ class AsyncBatchScraper:
                     await asyncio.sleep(random.uniform(0.5, 1.5))
                     
                     # Scrape with timeout
-                    result = await asyncio.wait_for(scraper_inst.scrape(task_mpn), timeout=60.0)
+                    result = await asyncio.wait_for(scraper_inst.scrape(task_mpn), timeout=20.0)
                 except Exception as e:
                     logger.warning(f"{vendor_name} error for {task_mpn}: {e}") 
                     result = None 
