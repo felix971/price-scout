@@ -1,114 +1,124 @@
 """
-Backup Scraper for JW Computers
-"""
-import logging
-from playwright.async_api import async_playwright
-from bs4 import BeautifulSoup
+JW Computers API Scraper (Formerly Playwright).
 
+This module implements a high-performance API scraper for JW Computers
+by reverse-engineering their Algolia search API. Replaces the slow
+Playwright implementation.
+"""
+
+import logging
+from curl_cffi.requests import AsyncSession
 from models.models import PriceResult
 from models.base_scraper import BaseScraper
 
 logger = logging.getLogger(__name__)
 
 class JWComputersScraper(BaseScraper):
+    """
+    API-based scraper for JW Computers using Algolia.
+    """
     vendor_id: str = "jw_computers"
-    currency: str = "AUD" 
+    currency: str = "AUD"
+    
+    # Algolia Credentials (Public Search Key)
+    APP_ID: str = "KDNP96B3XK"
+    API_KEY: str = "NjRlMjNiOWY0MWU4N2E3M2RiZjk3ZjU1M2FkOTgzYWRlOGExZTgyZTgwZWM4M2NkZWRmNGUyYzJjZjg1NDJkM3RhZ0ZpbHRlcnM9JnZhbGlkVW50aWw9MTc2OTc0MTU3OA=="
+    INDEX_NAME: str = "m2live_default_products"
+
     not_found: PriceResult = PriceResult(
-                                vendor_id=vendor_id,
-                                url=None,
-                                mpn=None,
-                                price=None,
-                                currency=None,
-                                found=False
-                                )
+        vendor_id=vendor_id,
+        url=None,
+        mpn=None,
+        price=None,
+        currency=None,
+        found=False
+    )
 
     async def scrape(self, mpn: str) -> PriceResult:
-        url = f"https://www.jw.com.au/catalogsearch/result/?q={mpn}"
-
-        async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=True)
-            page = await browser.new_page()
-
-            logger.info("Scraping JW Computers for MPN=%s", mpn)
-
-            try:
-                await page.goto(
-                    url,
-                    wait_until="networkidle",  # wait for JS requests
-                    timeout=60000              # 60 seconds
-                )
-            except Exception as e:
-                logger.warning("Page failed to load for MPN=%s at %s: %s", mpn, url, e)
-                return self.not_found
-
-            html = await page.content()
-            soup = BeautifulSoup(html, 'lxml')
-
-            product_lst = soup.select_one("ol.ais-InfiniteHits-list")
-            if not product_lst:
-                logger.warning(
-                    "Product not found for MPN=%s on JW Computers page %s",
-                    mpn,
-                    url,
-                )
-                return self.not_found
-            
-            # get the first item
-            product = product_lst.select_one("li.ais-InfiniteHits-item")
-            if not product:
-                logger.warning(
-                    "Product not found for MPN=%s on JW Computers page %s",
-                    mpn,
-                    url,
-                )
-                return self.not_found
-
-            # get price from link
-            link = product.select_one("a.result")["href"]
-
-            try:
-                await page.goto(
-                    link,
-                    wait_until="networkidle",  # wait for JS requests
-                    timeout=60000              # 60 seconds
-                )
-            except Exception as e:
-                logger.warning("Page failed to load for MPN=%s at %s: %s", mpn, url, e)
-                return self.not_found
-            
-            html = await page.content()
-            soup = BeautifulSoup(html, 'lxml')
+        url = f"https://{self.APP_ID}-dsn.algolia.net/1/indexes/{self.INDEX_NAME}/query"
         
-            mpn_div = soup.select_one("div.value[itemprop='mpn']")
-            if not mpn_div or mpn_div.get_text(strip=True) != mpn:
-                logger.warning(
-                    "Product not found for MPN=%s on JW Computers page %s",
-                    mpn,
-                    url
+        headers = {
+            "x-algolia-api-key": self.API_KEY,
+            "x-algolia-application-id": self.APP_ID,
+            "content-type": "application/json",
+            "referer": "https://www.jw.com.au/"
+        }
+        
+        payload = {
+            "query": mpn,
+            "hitsPerPage": 5,
+            # Fetch attributes we need
+            "attributesToRetrieve": [
+                "name", "mpn", "url", "price", "in_stock", 
+                "stock_availability", "condition", "inventoryavailability_primary"
+            ]
+        }
+
+        try:
+            async with AsyncSession() as s:
+                resp = await s.post(url, headers=headers, json=payload)
+                
+                if resp.status_code != 200:
+                    logger.warning(f"JWC API error: {resp.status_code}")
+                    return self.not_found
+                
+                data = resp.json()
+                hits = data.get('hits', [])
+                
+                if not hits:
+                    return self.not_found
+                
+                # Filter for exact MPN match if possible, or take best hit
+                target_mpn = mpn.lower().replace("-", "").strip()
+                
+                best_hit = None
+                for hit in hits:
+                    hit_mpn = str(hit.get('mpn', '')).lower().replace("-", "").strip()
+                    if target_mpn in hit_mpn or hit_mpn in target_mpn:
+                        best_hit = hit
+                        break
+                
+                if not best_hit:
+                    # Fallback to first hit if query was specific
+                    best_hit = hits[0]
+
+                # Extract Price
+                price_info = best_hit.get('price', {})
+                price = None
+                if isinstance(price_info, dict):
+                    price = float(price_info.get('AUD', {}).get('default', 0))
+                elif isinstance(price_info, (int, float)):
+                    price = float(price_info)
+                
+                if not price:
+                    return self.not_found
+
+                # Extract Stock
+                in_stock = bool(best_hit.get('in_stock', 0))
+                stock_text = best_hit.get('stock_availability', 'Unknown')
+                
+                # Detailed stock info from inventoryavailability_primary
+                inv_primary = best_hit.get('inventoryavailability_primary', {})
+                if inv_primary and isinstance(inv_primary, dict):
+                    desc = inv_primary.get('shortDescription') or inv_primary.get('longDescription')
+                    if desc:
+                        stock_text = desc
+
+                # Condition
+                condition = best_hit.get('condition', 'New')
+                final_condition = f"{condition} ({stock_text})" if in_stock else condition
+
+                return PriceResult(
+                    vendor_id=self.vendor_id,
+                    url=best_hit.get('url'),
+                    mpn=best_hit.get('mpn'),
+                    price=price,
+                    currency=self.currency,
+                    in_stock=in_stock,
+                    condition=final_condition,
+                    found=True
                 )
-                return self.not_found
 
-            price_text = soup.select("span.price")[-1]
-            if not price_text:
-                logger.warning(
-                    "Price not found for MPN=%s on JW Computers page %s",
-                    mpn,
-                    url
-                )
-                return self.not_found
-            else:
-                price_text = price_text.get_text(strip=True).replace(",", "")[1:]
-
-            in_stock = soup.select_one("span.dispatch-label.available").select("span")[-2].get_text() == "Available"
-
-            await browser.close()
-
-        return PriceResult(
-            vendor_id=self.vendor_id,
-            url=link,
-            mpn=mpn,
-            price=float(price_text),
-            currency=self.currency,
-            in_stock=in_stock,
-            found=True
-        )
+        except Exception as e:
+            logger.error(f"JWC API exception: {e}")
+            return self.not_found

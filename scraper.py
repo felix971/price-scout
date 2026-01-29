@@ -107,7 +107,7 @@ class AsyncBatchScraper:
     
     IMPROVED: Now supports intra-vendor concurrency (multiple MPNs per vendor).
     """
-    def __init__(self, mpns: List[str], detailed: bool = False, concurrency: int = 3):
+    def __init__(self, mpns: List[str], detailed: bool = False, concurrency: int = 10):
         self.mpns = mpns
         self.detailed = detailed
         self.concurrency = concurrency
