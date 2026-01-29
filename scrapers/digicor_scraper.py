@@ -90,39 +90,74 @@ class DigicorScraper(BaseScraper):
 
         soup = BeautifulSoup(res.text, "lxml")
 
-        product_element = soup.select_one("form.product-item")
+        # Iterate through all product items
+        product_items = soup.select("li.product-item")
+        if not product_items:
+            # Fallback to form selector if list not found
+            product_items = soup.select("form.product-item")
 
-        if not product_element:
+        if not product_items:
             logger.warning(
-                "Product not found for MPN=%s on Digicor page %s",
-                mpn,
-                url,
-            )
-            return self.not_found
-        
-        model_element = product_element.select_one("li").get_text().split()[-1]
-
-        if model_element != mpn:
-            logger.warning(
-                "Product not found for MPN=%s on Digicor page %s",
+                "No products found for MPN=%s on Digicor page %s",
                 mpn,
                 url,
             )
             return self.not_found
 
-        price_text = product_element.select_one("span.price").get_text()[2:]
-        image = product_element.select_one("a.product.photo")
-        url = image['href']
-        in_stock = image.select_one("span").get_text().strip() == "In Stock"
+        target_mpn = mpn.lower().strip()
 
-        logger.debug("Raw price text extracted: %s", price_text)
+        for product in product_items:
+            # Extract MPN from list item text (e.g., "Mpn:100-000000342")
+            # Usually found in a <li> tag inside the product item
+            mpn_found = False
+            found_mpn_text = ""
+            
+            li_tags = product.select("li")
+            for li in li_tags:
+                text = li.get_text(strip=True)
+                if "Mpn:" in text:
+                    found_mpn_text = text.split("Mpn:")[-1].strip()
+                    if found_mpn_text.lower() == target_mpn:
+                        mpn_found = True
+                        break
+            
+            # If not found in LI, maybe check product name for partial match as backup?
+            # For now, strict MPN match is safer as requested.
+            
+            if mpn_found:
+                price_elem = product.select_one("span.price")
+                if not price_elem:
+                    continue
+                    
+                price_text = price_elem.get_text().strip()
+                # Remove 'A$' and ','
+                clean_price = price_text.replace("A$", "").replace("$", "").replace(",", "").strip()
+                
+                # Get URL
+                link_elem = product.select_one("a.product-item-link") or product.select_one("a.product.photo")
+                product_url = link_elem['href'] if link_elem else url
+                
+                # Get Stock
+                stock_elem = product.select_one("div.stock span") or product.select_one("span.product-stock")
+                in_stock = False
+                if stock_elem and "in stock" in stock_elem.get_text().lower():
+                    in_stock = True
 
-        return PriceResult(
-            vendor_id=self.vendor_id,
-            url=url,
-            mpn=mpn,
-            price=float(price_text),
-            currency=self.currency,
-            in_stock=in_stock,
-            found=True
+                logger.info(f"Digicor: Found MPN={mpn}, Price={clean_price}")
+
+                return PriceResult(
+                    vendor_id=self.vendor_id,
+                    url=product_url,
+                    mpn=found_mpn_text, # Use the actual MPN found
+                    price=float(clean_price),
+                    currency=self.currency,
+                    in_stock=in_stock,
+                    found=True
+                )
+
+        logger.warning(
+            "Product matching MPN=%s not found in %d results on Digicor",
+            mpn,
+            len(product_items)
         )
+        return self.not_found
