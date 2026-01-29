@@ -8,6 +8,7 @@ for browser automation. Used as fallback when HTTP scraper fails.
 import json
 import logging
 import re
+from urllib.parse import quote_plus
 from bs4 import BeautifulSoup
 
 from models.models import PriceResult
@@ -41,7 +42,7 @@ class EbayScraper(BaseScraper):
         # LH_BIN=1: Buy It Now only
         # _sop=15: Sort by Price + Shipping: lowest first
         # LH_PrefLoc=2: Worldwide
-        search_url = f"https://www.ebay.com.au/sch/i.html?_nkw={mpn}&LH_BIN=1&_sop=15&LH_PrefLoc=2"
+        search_url = f"https://www.ebay.com.au/sch/i.html?_nkw={quote_plus(mpn)}&LH_BIN=1&_sop=15&LH_PrefLoc=2"
         
         page = None
         context = None
@@ -73,8 +74,8 @@ class EbayScraper(BaseScraper):
                 logger.warning("eBay AU (Playwright): No search results found for MPN=%s", mpn)
                 return self.not_found
 
-            # Iterate through items
-            for item in items:
+            # Iterate through items (limit to first 3 for speed)
+            for item in items[:3]:
                 link_elem = item.select_one("a.s-item__link") or item.select_one("a.s-card__link")
                 if not link_elem:
                     continue
@@ -96,7 +97,7 @@ class EbayScraper(BaseScraper):
 
                 # Navigate to product page for details
                 try:
-                    await page.goto(product_url, wait_until="domcontentloaded", timeout=45000)
+                    await page.goto(product_url, wait_until="domcontentloaded", timeout=15000)
                     product_html = await page.content()
                     product_soup = BeautifulSoup(product_html, "lxml")
 

@@ -1,18 +1,17 @@
 """
-Backup Scraper for Umart
+Backup Scraper for Umart (Adapted for PlaywrightManager)
 """
 import logging
-from playwright.async_api import async_playwright
 from bs4 import BeautifulSoup
-
 from models.models import PriceResult
 from models.base_scraper import BaseScraper
+from utils.playwright_manager import PlaywrightManager
 
 logger = logging.getLogger(__name__)
 
 class UmartScraper(BaseScraper):
     vendor_id: str = "umart"
-    currency: str = "AUD" 
+    currency: str = "AUD"
     not_found: PriceResult = PriceResult(
                                 vendor_id=vendor_id,
                                 url=None,
@@ -24,17 +23,25 @@ class UmartScraper(BaseScraper):
 
     async def scrape(self, mpn: str) -> PriceResult:
         url = f"https://www.umart.com.au/search.php?cat_id=&keywords={mpn}"
-        async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=True)
-            page = await browser.new_page()
+        
+        page = None
+        context = None
+
+        try:
+            page, context = await PlaywrightManager.get_page()
 
             logger.info("Scraping Umart for MPN=%s", mpn)
 
             try:
                 await page.goto(
                     url,
-                    wait_until="networkidle",  # wait for JS requests
-                    timeout=60000              # 60 seconds
+                    wait_until="domcontentloaded",
+                    timeout=30000
+                )
+                # Wait for search results or empty indicator
+                await page.wait_for_selector(
+                    "ul.list-unstyled.info.goods_row, .search-empty, .no-result",
+                    timeout=10000
                 )
             except Exception as e:
                 logger.warning("Page failed to load for MPN=%s at %s: %s", mpn, url, e)
@@ -51,7 +58,7 @@ class UmartScraper(BaseScraper):
                     url,
                 )
                 return self.not_found
-            
+
             # get the first item
             product = product_lst.select_one("li.goods_info.search_goods_list")
             if not product:
@@ -63,13 +70,20 @@ class UmartScraper(BaseScraper):
                 return self.not_found
 
             # get price from link
-            link = "https://www.umart.com.au/" + product.select_one("a")["href"]
+            link_tag = product.select_one("a")
+            if not link_tag:
+                 return self.not_found
+            link = "https://www.umart.com.au/" + link_tag["href"]
 
             try:
                 await page.goto(
                     link,
-                    wait_until="networkidle",  # wait for JS requests
-                    timeout=60000              # 60 seconds
+                    wait_until="domcontentloaded",
+                    timeout=30000
+                )
+                await page.wait_for_selector(
+                    "div.spec-right[itemprop='mpn'], span.goods-price",
+                    timeout=10000
                 )
             except Exception as e:
                 logger.warning("Page failed to load for MPN=%s at %s: %s", mpn, url, e)
@@ -98,16 +112,23 @@ class UmartScraper(BaseScraper):
             else:
                 price_text = price_text.get_text(strip=True)
 
-            in_stock = product.select_one("span.goods_stock").select_one("span").get_text() == "In Stock"
+            stock_elem = product.select_one("span.goods_stock").select_one("span")
+            in_stock = stock_elem.get_text() == "In Stock" if stock_elem else False
 
-            await browser.close()
-
-        return PriceResult(
-            vendor_id=self.vendor_id,
-            url=link,
-            mpn=mpn,
-            price=float(price_text),
-            currency=self.currency,
-            in_stock=in_stock,
-            found=True
-        )
+            return PriceResult(
+                vendor_id=self.vendor_id,
+                url=link,
+                mpn=mpn,
+                price=float(price_text),
+                currency=self.currency,
+                in_stock=in_stock,
+                found=True
+            )
+            
+        except Exception as e:
+            logger.error(f"Umart Playwright error: {e}")
+            return self.not_found
+            
+        finally:
+            if page and context:
+                await PlaywrightManager.close_page(context, page)

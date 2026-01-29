@@ -10,6 +10,7 @@ Classes:
 
 import logging
 import re
+from urllib.parse import quote_plus
 from bs4 import BeautifulSoup
 from curl_cffi.requests import AsyncSession
 from models.models import PriceResult
@@ -42,7 +43,13 @@ class AmazonScraper(BaseScraper):
         found=False
     )
 
-    async def scrape(self, mpn: str) -> PriceResult:
+    def _normalize(self, text: str) -> str:
+        """Remove non-alphanumeric characters and lowercase for flexible comparison."""
+        if not text:
+            return ""
+        return re.sub(r'[\W_]+', '', text).lower()
+
+    async def scrape(self, mpn: str, session=None) -> PriceResult:
         """
         Scrape price data for a given MPN from Amazon Australia.
 
@@ -53,11 +60,12 @@ class AmazonScraper(BaseScraper):
 
         Args:
             mpn: Manufacturer Part Number to search for.
+            session: Optional shared AsyncSession for connection reuse.
 
         Returns:
             PriceResult with product data if found, otherwise not_found.
         """
-        search_url = f"https://www.amazon.com.au/s?k={mpn}"
+        search_url = f"https://www.amazon.com.au/s?k={quote_plus(mpn)}"
 
         headers = {
             "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -67,67 +75,76 @@ class AmazonScraper(BaseScraper):
 
         logger.info(f"Amazon AU HTTP: Searching for MPN={mpn}")
 
+        own_session = session is None
+        s = session or AsyncSession()
         try:
-            async with AsyncSession() as s:
-                # 1. Get search results
-                resp = await s.get(
-                    search_url,
-                    headers=headers,
-                    impersonate="chrome124",
-                    timeout=30
-                )
+            # 1. Get search results
+            resp = await s.get(
+                search_url,
+                headers=headers,
+                impersonate="chrome124",
+                timeout=30
+            )
 
-                if resp.status_code != 200:
-                    logger.warning(f"Amazon AU HTTP: Search failed with status {resp.status_code}")
-                    return self.not_found
+            if resp.status_code != 200:
+                logger.warning(f"Amazon AU HTTP: Search failed with status {resp.status_code}")
+                return self.not_found
 
-                soup = BeautifulSoup(resp.text, "lxml")
+            soup = BeautifulSoup(resp.text, "lxml")
 
-                # 2. Find search result items
-                results = soup.select('[data-component-type="s-search-result"]')
-                if not results:
-                    logger.info(f"Amazon AU HTTP: No search results for MPN={mpn}")
-                    return self.not_found
+            # 2. Find search result items
+            results = soup.select('[data-component-type="s-search-result"]')
+            if not results:
+                logger.info(f"Amazon AU HTTP: No search results for MPN={mpn}")
+                return self.not_found
 
-                # 3. Check each result for MPN match, collect all candidates
-                candidates = []
+            # 3. Check each result for MPN match, collect all candidates
+            candidates = []
+            normalized_mpn = self._normalize(mpn)
 
-                for result in results[:5]:  # Check first 5 results
-                    asin = result.get("data-asin", "")
-                    if not asin:
+            for result in results[:3]:  # Check first 3 results
+                asin = result.get("data-asin", "")
+                if not asin:
+                    continue
+
+                # Check if MPN appears in title (quick filter)
+                mpn_in_title = False
+                title_elem = result.select_one("h2 span")
+                if title_elem:
+                    title = title_elem.get_text(strip=True)
+                    if normalized_mpn in self._normalize(title):
+                        mpn_in_title = True
+
+                product_url = f"https://www.amazon.com.au/dp/{asin}"
+
+                # Fast path: if MPN in title, try search result price first (no page visit)
+                if mpn_in_title:
+                    sr_result = self._extract_from_search_result(result, mpn, asin)
+                    if sr_result.found:
+                        candidates.append(sr_result)
                         continue
 
-                    # Check if MPN appears in title (quick filter)
-                    mpn_in_title = False
-                    title_elem = result.select_one("h2 span")
-                    if title_elem:
-                        title = title_elem.get_text(strip=True)
-                        mpn_in_title = mpn.upper() in title.upper()
+                # Slow path: visit product page to validate MPN and extract price
+                product_result = await self._scrape_product_page(
+                    s, headers, product_url, mpn, skip_validation=mpn_in_title
+                )
+                if product_result.found:
+                    candidates.append(product_result)
 
-                    # Visit product page — title match confirms MPN, otherwise validate on page
-                    product_url = f"https://www.amazon.com.au/dp/{asin}"
-                    product_result = await self._scrape_product_page(
-                        s, headers, product_url, mpn, skip_validation=mpn_in_title
-                    )
-                    if product_result.found:
-                        candidates.append(product_result)
-                    elif mpn_in_title:
-                        # Fallback: use search result price if product page fails
-                        sr_result = self._extract_from_search_result(result, mpn, asin)
-                        if sr_result.found:
-                            candidates.append(sr_result)
+            if candidates:
+                best = min(candidates, key=lambda r: r.price)
+                logger.info(f"Amazon AU HTTP: Best price for MPN={mpn}: ${best.price} from {len(candidates)} candidates")
+                return best
 
-                if candidates:
-                    best = min(candidates, key=lambda r: r.price)
-                    logger.info(f"Amazon AU HTTP: Best price for MPN={mpn}: ${best.price} from {len(candidates)} candidates")
-                    return best
-
-                logger.info(f"Amazon AU HTTP: No exact match found for MPN={mpn}")
-                return self.not_found
+            logger.info(f"Amazon AU HTTP: No exact match found for MPN={mpn}")
+            return self.not_found
 
         except Exception as e:
             logger.error(f"Amazon AU HTTP: Error for MPN={mpn}: {e}")
             return self.not_found
+        finally:
+            if own_session:
+                await s.close()
 
     def _extract_from_search_result(self, result, mpn: str, asin: str) -> PriceResult:
         """
@@ -251,6 +268,8 @@ class AmazonScraper(BaseScraper):
         Returns:
             True if MPN matches, False otherwise
         """
+        normalized_mpn = self._normalize(mpn)
+        
         # Check product details tables
         detail_rows = soup.select(
             '#productDetails_techSpec_section_1 tr, '
@@ -267,14 +286,14 @@ class AmazonScraper(BaseScraper):
                 value = td.get_text(strip=True)
                 # Check various fields that might contain MPN
                 if any(keyword in label for keyword in ['part number', 'mpn', 'model number', 'processor model']):
-                    if mpn.upper() in value.upper():
+                    if normalized_mpn in self._normalize(value):
                         return True
 
         # Check title as fallback
         title_elem = soup.select_one('#productTitle')
         if title_elem:
             title = title_elem.get_text(strip=True)
-            if mpn.upper() in title.upper():
+            if normalized_mpn in self._normalize(title):
                 return True
 
         return False

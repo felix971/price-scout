@@ -28,6 +28,8 @@ from scrapers.ple.ple_scraper import PLEScraper
 from scrapers.serversupply.serversupply_scraper import ServerSupplyScraper
 from scrapers.ebay.ebay_scraper import EbayScraper
 from scrapers.amazon.amazon_scraper import AmazonScraper
+from scrapers.amazon.amazon_scraper_http import AmazonScraper as AmazonHTTPScraper
+from scrapers.ebay.ebay_scraper_http import EbayScraper as EbayHTTPScraper
 
 from scrapers.umart.umart_scraper_playwright import UmartScraper as UmartPlaywrightScraper
 from scrapers.jwc.jw_computer_scraper_playwright import JWComputersScraper as JWCPlaywrightScraper
@@ -46,6 +48,15 @@ logging.basicConfig(
 )
 
 logger = logging.getLogger("price-scout")
+
+# Per-vendor scraping configuration overrides.
+# Vendors not listed here use DEFAULT_CONFIG.
+VENDOR_CONFIG = {
+    "Amazon AU": {"concurrency": 5, "timeout": 45.0, "jitter": (1.5, 3.0)},
+    "eBay AU":   {"concurrency": 5, "timeout": 45.0, "jitter": (1.5, 3.0)},
+    "Umart":     {"concurrency": 5, "timeout": 40.0, "jitter": (0.5, 1.5)},
+}
+DEFAULT_CONFIG = {"concurrency": 5, "timeout": 20.0, "jitter": (0.5, 1.5)}
 
 def get_scraper_instances(detailed=False):
     """Return list of (vendor_name, scraper_instance) tuples."""
@@ -66,7 +77,7 @@ def get_scraper_instances(detailed=False):
             ("PLE", PLEScraper()),
             ("Server Supply", ServerSupplyScraper()),
             ("eBay AU", EbayScraper()),
-            ("Amazon AU", AmazonScraper()),
+            ("Amazon AU", AmazonHTTPScraper()),
         ]
     return [
         ("Digicor", DigicorScraper()),
@@ -107,7 +118,7 @@ class AsyncBatchScraper:
     
     IMPROVED: Now supports intra-vendor concurrency (multiple MPNs per vendor).
     """
-    def __init__(self, mpns: List[str], detailed: bool = False, concurrency: int = 10):
+    def __init__(self, mpns: List[str], detailed: bool = False, concurrency: int = 3):
         self.mpns = mpns
         self.detailed = detailed
         self.concurrency = concurrency
@@ -146,6 +157,10 @@ class AsyncBatchScraper:
         # Cleanup
         for t in worker_tasks:
             t.cancel()
+        
+        # Wait for workers to finish cancelling
+        if worker_tasks:
+            await asyncio.gather(*worker_tasks, return_exceptions=True)
             
     async def _vendor_specific_worker(self, vendor_name, scraper_inst, queue):
         """
@@ -153,22 +168,36 @@ class AsyncBatchScraper:
         Uses a Semaphore to limit concurrency per vendor.
         """
         import random
-        semaphore = asyncio.Semaphore(self.concurrency)
+        import inspect
+        cfg = VENDOR_CONFIG.get(vendor_name, DEFAULT_CONFIG)
+        semaphore = asyncio.Semaphore(cfg["concurrency"])
+        timeout = cfg["timeout"]
+        jitter_min, jitter_max = cfg["jitter"]
         pending_tasks = set()
+
+        # Create shared HTTP session for connection reuse if scraper supports it
+        accepts_session = 'session' in inspect.signature(scraper_inst.scrape).parameters
+        shared_session = None
+        if accepts_session:
+            from curl_cffi.requests import AsyncSession
+            shared_session = AsyncSession()
 
         async def _bounded_scrape(task_mpn):
             async with semaphore:
                 try:
-                    # Add random jitter delay (0.5 to 1.5 seconds) 
-                    # to prevent synchronized spikes across all vendors
-                    await asyncio.sleep(random.uniform(0.5, 1.5))
-                    
-                    # Scrape with timeout
-                    result = await asyncio.wait_for(scraper_inst.scrape(task_mpn), timeout=20.0)
+                    await asyncio.sleep(random.uniform(jitter_min, jitter_max))
+                    if shared_session:
+                        result = await asyncio.wait_for(
+                            scraper_inst.scrape(task_mpn, session=shared_session), timeout=timeout
+                        )
+                    else:
+                        result = await asyncio.wait_for(
+                            scraper_inst.scrape(task_mpn), timeout=timeout
+                        )
                 except Exception as e:
-                    logger.warning(f"{vendor_name} error for {task_mpn}: {e}") 
-                    result = None 
-                
+                    logger.warning(f"{vendor_name} error for {task_mpn}: {e}")
+                    result = None
+
                 await self.results_queue.put({
                     'mpn': task_mpn,
                     'vendor': vendor_name,
@@ -176,13 +205,21 @@ class AsyncBatchScraper:
                 })
                 queue.task_done()
 
-        while True:
-            # Get next MPN from queue
-            mpn = await queue.get()
-            
-            task = asyncio.create_task(_bounded_scrape(mpn))
-            pending_tasks.add(task)
-            task.add_done_callback(pending_tasks.discard)
+        try:
+            while True:
+                # Get next MPN from queue
+                mpn = await queue.get()
+
+                task = asyncio.create_task(_bounded_scrape(mpn))
+                pending_tasks.add(task)
+                task.add_done_callback(pending_tasks.discard)
+        except asyncio.CancelledError:
+            # Cancel all in-flight scrape tasks and wait for them to finish
+            for t in pending_tasks:
+                t.cancel()
+            if pending_tasks:
+                await asyncio.gather(*pending_tasks, return_exceptions=True)
+            raise
 
 def read_mpns_from_csv(csv_path: str) -> List[str]:
     """Read Manufacturer Part Numbers from a CSV file."""

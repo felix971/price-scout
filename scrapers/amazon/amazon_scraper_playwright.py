@@ -7,6 +7,7 @@ Optimized for speed by reusing browser instances and blocking images/media.
 
 import logging
 import re
+from urllib.parse import quote_plus
 from bs4 import BeautifulSoup
 
 from models.models import PriceResult
@@ -32,11 +33,17 @@ class AmazonScraper(BaseScraper):
         found=False
     )
 
+    def _normalize(self, text: str) -> str:
+        """Remove non-alphanumeric characters and lowercase for flexible comparison."""
+        if not text:
+            return ""
+        return re.sub(r'[\W_]+', '', text).lower()
+
     async def scrape(self, mpn: str) -> PriceResult:
         """
         Scrape price data for a given MPN from Amazon Australia using Shared Playwright.
         """
-        search_url = f"https://www.amazon.com.au/s?k={mpn}"
+        search_url = f"https://www.amazon.com.au/s?k={quote_plus(mpn)}"
         
         page = None
         context = None
@@ -75,9 +82,10 @@ class AmazonScraper(BaseScraper):
 
             # Collect all matching results, then return cheapest
             candidates = []
+            normalized_mpn = self._normalize(mpn)
 
-            # Amazon often returns unrelated sponsored items first, so check top 5
-            for result in results[:5]:
+            # Amazon often returns unrelated sponsored items first, so check top 3
+            for result in results[:3]:
                 asin = result.get("data-asin", "")
                 if not asin:
                     continue
@@ -87,30 +95,34 @@ class AmazonScraper(BaseScraper):
                 title_elem = result.select_one("h2 span")
                 if title_elem:
                     title = title_elem.get_text(strip=True)
-                    mpn_in_title = mpn.upper() in title.upper()
+                    if normalized_mpn in self._normalize(title):
+                        mpn_in_title = True
 
-                # Visit product page — title match confirms MPN, otherwise validate on page
                 product_url = f"https://www.amazon.com.au/dp/{asin}"
+
+                # Fast path: if MPN in title, try search result price first (no page visit)
+                if mpn_in_title:
+                    sr_result = self._extract_from_search_result(result, mpn, asin)
+                    if sr_result.found:
+                        candidates.append(sr_result)
+                        continue
+
+                # Slow path: visit product page to validate MPN and extract price
                 try:
                     await page.goto(product_url, wait_until="domcontentloaded", timeout=15000)
                     try:
                         await page.wait_for_selector('#productTitle', timeout=5000)
                     except Exception:
                         pass
-                        
+
                     product_html = await page.content()
                     product_result = self._extract_from_product_page(
-                        product_html, mpn, product_url, skip_validation=mpn_in_title
+                        product_html, mpn, product_url, skip_validation=False
                     )
                     if product_result.found:
                         candidates.append(product_result)
-                        
+
                 except Exception:
-                    # Fallback: use search result price if product page fails
-                    if mpn_in_title:
-                        sr_result = self._extract_from_search_result(result, mpn, asin)
-                        if sr_result.found:
-                            candidates.append(sr_result)
                     continue
 
             if candidates:
@@ -202,6 +214,8 @@ class AmazonScraper(BaseScraper):
 
     def _validate_mpn(self, soup: BeautifulSoup, mpn: str) -> bool:
         """Validate MPN on product page."""
+        normalized_mpn = self._normalize(mpn)
+        
         detail_rows = soup.select(
             '#productDetails_techSpec_section_1 tr, '
             '#productDetails_detailBullets_sections1 tr, '
@@ -216,13 +230,13 @@ class AmazonScraper(BaseScraper):
                 label = th.get_text(strip=True).lower()
                 value = td.get_text(strip=True)
                 if any(keyword in label for keyword in ['part number', 'mpn', 'model number', 'processor model']):
-                    if mpn.upper() in value.upper():
+                    if normalized_mpn in self._normalize(value):
                         return True
 
         title_elem = soup.select_one('#productTitle')
         if title_elem:
             title = title_elem.get_text(strip=True)
-            if mpn.upper() in title.upper():
+            if normalized_mpn in self._normalize(title):
                 return True
 
         return False

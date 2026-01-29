@@ -11,6 +11,7 @@ Classes:
 import json
 import logging
 import re
+from urllib.parse import quote_plus
 from bs4 import BeautifulSoup
 from curl_cffi.requests import AsyncSession
 from models.models import PriceResult
@@ -55,7 +56,7 @@ class EbayScraper(BaseScraper):
         found=False
     )
 
-    async def scrape(self, mpn: str) -> PriceResult:
+    async def scrape(self, mpn: str, session=None) -> PriceResult:
         """
         Scrape price data using HTTP requests and product page validation.
 
@@ -65,6 +66,7 @@ class EbayScraper(BaseScraper):
 
         Args:
             mpn: Manufacturer Part Number to search for.
+            session: Optional shared AsyncSession for connection reuse.
 
         Returns:
             PriceResult with complete product data if found, otherwise not_found result.
@@ -72,7 +74,7 @@ class EbayScraper(BaseScraper):
         # Search URL for eBay Australia
         # LH_BIN=1: Buy It Now only
         # _sop=15: Sort by Price + Shipping: lowest first
-        search_url = f"https://www.ebay.com.au/sch/i.html?_nkw={mpn}&LH_BIN=1&_sop=15"
+        search_url = f"https://www.ebay.com.au/sch/i.html?_nkw={quote_plus(mpn)}&LH_BIN=1&_sop=15"
 
         headers = {
             "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -80,50 +82,54 @@ class EbayScraper(BaseScraper):
             "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36",
         }
 
+        own_session = session is None
+        s = session or AsyncSession()
         try:
-            async with AsyncSession() as s:
-                # 1. Get search results
-                logger.info("eBay AU: Searching for MPN=%s", mpn)
-                resp = await s.get(search_url, headers=headers, impersonate="chrome124")
-                if resp.status_code != 200:
-                    logger.warning("eBay AU: Search request failed with status %d", resp.status_code)
-                    return self.not_found
-
-                soup = BeautifulSoup(resp.text, "lxml")
-
-                # 2. Find all search result items
-                items = soup.select("li.s-item")
-                if not items:
-                    logger.warning("eBay AU: No search results found for MPN=%s", mpn)
-                    return self.not_found
-
-                # 3. Iterate through items
-                for item in items:
-                    link_elem = item.select_one("a.s-item__link")
-                    if not link_elem:
-                        continue
-
-                    product_url = link_elem.get("href", "")
-                    if not product_url or "ebay.com.au/itm/" not in product_url:
-                        continue
-
-                    title_elem = item.select_one("h3.s-item__title") or item.select_one("div.s-item__title span")
-                    if title_elem:
-                        title_text = title_elem.get_text(strip=True).lower()
-                        if "shop on ebay" in title_text:
-                            continue
-
-                    # 4. Visit product page to validate MPN
-                    result = await self._scrape_product_page(s, headers, product_url, mpn)
-                    if result.found:
-                        return result
-
-                logger.warning("eBay AU: No matching product found for MPN=%s", mpn)
+            # 1. Get search results
+            logger.info("eBay AU: Searching for MPN=%s", mpn)
+            resp = await s.get(search_url, headers=headers, impersonate="chrome124")
+            if resp.status_code != 200:
+                logger.warning("eBay AU: Search request failed with status %d", resp.status_code)
                 return self.not_found
+
+            soup = BeautifulSoup(resp.text, "lxml")
+
+            # 2. Find all search result items
+            items = soup.select("li.s-item")
+            if not items:
+                logger.warning("eBay AU: No search results found for MPN=%s", mpn)
+                return self.not_found
+
+            # 3. Iterate through items (limit to first 3 for speed)
+            for item in items[:3]:
+                link_elem = item.select_one("a.s-item__link")
+                if not link_elem:
+                    continue
+
+                product_url = link_elem.get("href", "")
+                if not product_url or "ebay.com.au/itm/" not in product_url:
+                    continue
+
+                title_elem = item.select_one("h3.s-item__title") or item.select_one("div.s-item__title span")
+                if title_elem:
+                    title_text = title_elem.get_text(strip=True).lower()
+                    if "shop on ebay" in title_text:
+                        continue
+
+                # 4. Visit product page to validate MPN
+                result = await self._scrape_product_page(s, headers, product_url, mpn)
+                if result.found:
+                    return result
+
+            logger.warning("eBay AU: No matching product found for MPN=%s", mpn)
+            return self.not_found
 
         except Exception as e:
             logger.error("eBay AU: Error scraping: %s", e)
             return self.not_found
+        finally:
+            if own_session:
+                await s.close()
 
     async def _scrape_product_page(
         self, session: AsyncSession, headers: dict, product_url: str, mpn: str

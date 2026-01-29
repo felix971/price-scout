@@ -33,10 +33,14 @@ Vendors Supported:
 import time
 import asyncio
 import sys
+import warnings
 
 # Fix for Windows asyncio loop
 if sys.platform == 'win32':
-    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+    # Suppress DeprecationWarning for WindowsProactorEventLoopPolicy in Python 3.14+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
 import pandas as pd
 from io import StringIO
@@ -291,9 +295,8 @@ with tab_batch:
                 col_to_use = next((c for c in ['mpn', 'MPN'] if c in df_upload.columns), None)
 
                 if col_to_use:
-                    st.session_state.mpn_list = df_upload[[col_to_use]].dropna().rename(
-                        columns={col_to_use: 'MPN To Process'}
-                    )
+                    df_upload['MPN To Process'] = df_upload[col_to_use].astype(str).str.strip()
+                    st.session_state.mpn_list = df_upload[['MPN To Process']].dropna()
                 else:
                     st.error("❌ CSV must contain the 'mpn' or 'MPN' column")
                     st.stop()
@@ -332,19 +335,31 @@ with tab_batch:
                 
                 async def run_batch():
                     from utils.playwright_manager import PlaywrightManager
+
+                    # Suppress Playwright orphan future errors during shutdown
+                    def _ignore_shutdown_errors(loop, context):
+                        exc = context.get("exception")
+                        if exc and ("Target" in str(type(exc).__name__) or "closed" in str(exc).lower()):
+                            return
+                        loop.default_exception_handler(context)
+                    asyncio.get_event_loop().set_exception_handler(_ignore_shutdown_errors)
+
                     try:
                         async for res_item in scraper_system.start():
                             progress_state['received'] += 1
                             results_received = progress_state['received']
-                            mpn = res_item['mpn']
-                            vendor = res_item['vendor']
-                            result = res_item['result']
-                            
+                            mpn = res_item.get('mpn')
+                            vendor = res_item.get('vendor', '')
+                            result = res_item.get('result')
+
+                            if not mpn:
+                                continue
+
                             # Update progress
                             progress = results_received / total_expected_results
                             progress_bar.progress(min(progress, 1.0))
                             status_text.text(f"Processing... {results_received}/{total_expected_results} checks completed.")
-                            
+
                             # Save result
                             if mpn not in all_results_dict:
                                 all_results_dict[mpn] = {}
@@ -374,7 +389,23 @@ with tab_batch:
                     finally:
                         await PlaywrightManager.shutdown()
 
+                import sys
+                import os
+                import warnings
+                warnings.filterwarnings("ignore", category=ResourceWarning)
+
                 asyncio.run(run_batch())
+
+                # Suppress Windows Playwright subprocess pipe cleanup noise.
+                # Python 3.14 __del__ deallocator errors write directly to stderr
+                # and cannot be caught by sys.unraisablehook. Briefly silence stderr
+                # while GC collects the stale transport objects.
+                import gc
+                _real_stderr = sys.stderr
+                sys.stderr = open(os.devnull, 'w')
+                gc.collect()
+                sys.stderr.close()
+                sys.stderr = _real_stderr
                 
                 # Post-processing for Display Matrix
                 successful_count = 0
