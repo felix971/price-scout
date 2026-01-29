@@ -105,14 +105,23 @@ class JWComputersScraper(BaseScraper):
                     best_hit = hit
                     break
             
-            # 2. If no exact match, trust Algolia's first result
-            # (Algolia's ranking is usually good enough for search queries)
+            # 2. If no exact match, trust Algolia's first result BUT with sanity check
             if not best_hit:
-                best_hit = hits[0]
-                # Log warning if it looks very different (optional safety check)
-                # hit_name = str(best_hit.get('name', '')).lower()
-                # if target_mpn not in hit_name and len(target_mpn) > 4:
-                #     logger.warning(f"JWC: Loose match for {mpn} -> {best_hit.get('name')}")
+                candidate = hits[0]
+                cand_name = str(candidate.get('name', '')).lower()
+                cand_mpn = str(candidate.get('mpn', '')).lower()
+                
+                # Check if target MPN is present in Name or MPN field (partial match)
+                # We use a simplified target_mpn (no dashes/slashes) for comparison
+                search_term_simple = target_mpn.replace(" ", "")
+                cand_name_simple = cand_name.replace("-", "").replace("/", "").replace(" ", "")
+                cand_mpn_simple = cand_mpn.replace("-", "").replace("/", "").replace(" ", "")
+                
+                if search_term_simple in cand_name_simple or search_term_simple in cand_mpn_simple:
+                    best_hit = candidate
+                else:
+                    logger.warning(f"JWC: Rejecting loose match '{candidate.get('name')}' for MPN '{mpn}'")
+                    return self.not_found
 
             # Extract Price
             price_info = best_hit.get('price', {})

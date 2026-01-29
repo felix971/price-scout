@@ -105,12 +105,27 @@ class PBTechScraper(BaseScraper):
                     logger.info(f"PB Tech Playwright: No products found for MPN={mpn}")
                     return self.not_found
 
-                # Look for exact MPN match
+                # Look for matching product
+                target_mpn = mpn.upper().replace(" ", "").replace("-", "")
+                
                 for card in product_cards:
-                    mpn_value = self._extract_mpn_from_card(card)
+                    # 1. Check extracted MPN
+                    card_mpn = self._extract_mpn_from_card(card)
+                    if card_mpn:
+                        clean_card_mpn = card_mpn.upper().replace(" ", "").replace("-", "")
+                        if target_mpn in clean_card_mpn or clean_card_mpn in target_mpn:
+                            return self._extract_product_from_card(card, card_mpn)
+                    
+                    # 2. Check Product Name (Fallback)
+                    name_elem = card.select_one("a.js-product-link span")
+                    if name_elem:
+                        name_text = name_elem.get_text(strip=True).upper().replace(" ", "").replace("-", "")
+                        if target_mpn in name_text:
+                             return self._extract_product_from_card(card, mpn)
 
-                    if mpn_value and mpn_value.upper() == mpn.upper():
-                        return self._extract_product_from_card(card, mpn_value)
+                # If only 1 result and we searched for a long MPN, trust it
+                if len(product_cards) == 1 and len(mpn) > 6:
+                     return self._extract_product_from_card(product_cards[0], mpn)
 
                 logger.info(f"PB Tech Playwright: No exact match found for MPN={mpn}")
                 return self.not_found
