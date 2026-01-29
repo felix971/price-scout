@@ -54,32 +54,13 @@ logging.basicConfig(
 logger = logging.getLogger("price-scout")
 
 
-async def scrape_mpn_single(mpn, detailed=False):
-    """
-    Scrape price data for a single MPN from all supported vendors concurrently.
+SCRAPER_TIMEOUT = 30  # seconds per vendor
 
-    Queries all 5 vendors simultaneously and aggregates results. Handles
-    exceptions gracefully by logging errors while returning partial results.
 
-    Args:
-        mpn: Manufacturer Part Number to search for.
-
-    Returns:
-        List of PriceResult objects from each vendor scraper. Results may include
-        exceptions for failed scrapers.
-
-    Example:
-        >>> results = await scrape_mpn_single("BX8071512100F")
-        >>> for result in results:
-        ...     print(f"{result.vendor_id}: ${result.price}")
-    """
-    start = time.perf_counter()
-    mpn = mpn.strip()
-
-    logger.info("Starting price scout for MPN=%s", mpn)
-
+def _get_scrapers(detailed=False):
+    """Return list of (vendor_name, scraper_instance) tuples."""
     if not detailed:
-        scrapers = [
+        return [
             ("Digicor", DigicorScraper()),
             ("Scorptec", ScorptecScraper()),
             ("Mwave", MwaveScraper()),
@@ -95,61 +76,86 @@ async def scrape_mpn_single(mpn, detailed=False):
             ("PLE", PLEScraper()),
             ("Server Supply", ServerSupplyScraper()),
             ("eBay AU", EbayScraper()),
-            ("Amazon AU", AmazonScraper())
+            ("Amazon AU", AmazonScraper()),
         ]
-    else:
-        scrapers = [
-            ("Digicor", DigicorScraper()),
-            ("Scorptec", ScorptecCloudScraper()),
-            ("Mwave", MwaveScraper()),
-            ("PC Case Gear", PCCaseGearPlaywrightScraper()),
-            ("JW Computers", JWCPlaywrightScraper()),
-            ("Umart", UmartPlaywrightScraper()),
-            ("Centrecom", CentrecomPlaywrightScraper()),
-            ("Computer Alliance", ComputerAllianceScraper()),
-            ("CPL", CPLScraper()),
-            ("Device Deal", DeviceDealScraper()),
-            ("PB Tech", PBTechPlaywrightScraper()),
-            ("Wired Zone", WiredZoneScraper()),
-            ("PLE", PLEPlaywrightScraper()),
-            ("Server Supply", ServerSupplyScraper()),
-            ("eBay AU", EbayPlaywrightScraper()),
-            ("Amazon AU", AmazonPlaywrightScraper())
-        ]
+    return [
+        ("Digicor", DigicorScraper()),
+        ("Scorptec", ScorptecCloudScraper()),
+        ("Mwave", MwaveScraper()),
+        ("PC Case Gear", PCCaseGearPlaywrightScraper()),
+        ("JW Computers", JWCPlaywrightScraper()),
+        ("Umart", UmartPlaywrightScraper()),
+        ("Centrecom", CentrecomPlaywrightScraper()),
+        ("Computer Alliance", ComputerAllianceScraper()),
+        ("CPL", CPLScraper()),
+        ("Device Deal", DeviceDealScraper()),
+        ("PB Tech", PBTechPlaywrightScraper()),
+        ("Wired Zone", WiredZoneScraper()),
+        ("PLE", PLEPlaywrightScraper()),
+        ("Server Supply", ServerSupplyScraper()),
+        ("eBay AU", EbayPlaywrightScraper()),
+        ("Amazon AU", AmazonPlaywrightScraper()),
+    ]
 
-    # Wrap each scraper with a per-vendor timeout so no single slow
-    # Playwright scraper blocks the entire gather.
-    SCRAPER_TIMEOUT = 30  # seconds per vendor
 
-    async def _scrape_with_timeout(vendor_name, scraper_inst, search_mpn):
+async def scrape_mpn_streaming(mpn, detailed=False):
+    """
+    Async generator that yields (vendor_name, PriceResult|None) as each
+    vendor completes, fastest first.
+
+    Uses an asyncio.Queue so each vendor worker pushes its result
+    independently — the caller receives results in completion order.
+    """
+    mpn = mpn.strip()
+    scrapers = _get_scrapers(detailed)
+    result_queue = asyncio.Queue()
+
+    async def _worker(vendor_name, scraper_inst):
         try:
-            return await asyncio.wait_for(
-                scraper_inst.scrape(search_mpn), timeout=SCRAPER_TIMEOUT
+            result = await asyncio.wait_for(
+                scraper_inst.scrape(mpn), timeout=SCRAPER_TIMEOUT
             )
         except asyncio.TimeoutError:
             logger.warning("%s scraper timed out after %ds", vendor_name, SCRAPER_TIMEOUT)
-            return None
+            result = None
         except Exception as e:
             logger.error("%s scraper failed: %s", vendor_name, e)
-            return None
+            result = None
+        await result_queue.put((vendor_name, result))
 
-    tasks = [
-        _scrape_with_timeout(vendor, scraper, mpn)
-        for vendor, scraper in scrapers
-    ]
-    results = await asyncio.gather(*tasks)
+    # Launch all workers concurrently
+    tasks = [asyncio.create_task(_worker(v, s)) for v, s in scrapers]
 
-    for (vendor, _), result in zip(scrapers, results):
+    # Yield results in completion order
+    for _ in range(len(scrapers)):
+        vendor_name, result = await result_queue.get()
         if result:
-            logger.info("%s result: %s", vendor, result)
+            logger.info("%s result: %s", vendor_name, result)
         else:
-            logger.warning("No %s result found (or timed out)", vendor)
+            logger.warning("No %s result found (or timed out)", vendor_name)
+        yield vendor_name, result
 
-    # Log time
+    # Safety: ensure all tasks are done
+    await asyncio.gather(*tasks, return_exceptions=True)
+
+
+async def scrape_mpn_single(mpn, detailed=False):
+    """
+    Scrape price data for a single MPN from all supported vendors concurrently.
+
+    Collects all results from scrape_mpn_streaming and returns them as a list.
+    """
+    start = time.perf_counter()
+    logger.info("Starting price scout for MPN=%s", mpn)
+
+    results = []
+    async for _vendor, result in scrape_mpn_streaming(mpn, detailed):
+        if result is not None:
+            results.append(result)
+
     elapsed = time.perf_counter() - start
     logger.info("All scrapers completed in %.2f seconds", elapsed)
-
-    return [r for r in results if r is not None]
+    return results
 
 
 def read_mpns_from_csv(csv_path: str) -> List[str]:
