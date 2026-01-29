@@ -19,7 +19,7 @@ import asyncio
 from typing import List
 
 from scrapers.scorptec.scorptec_scraper import ScorptecScraper
-from scrapers.mwave_scraper import MwaveScraper
+from scrapers.mwave.mwave_scraper import MwaveScraper
 from scrapers.pccg.pc_case_gear_scraper import PCCaseGearScraper
 from scrapers.jwc.jw_computer_scraper import JWComputersScraper
 from scrapers.umart.umart_scraper import UmartScraper
@@ -117,22 +117,39 @@ async def scrape_mpn_single(mpn, detailed=False):
             ("Amazon AU", AmazonPlaywrightScraper())
         ]
 
-    tasks = [scraper.scrape(mpn) for _, scraper in scrapers]  # coroutine objects
-    results = await asyncio.gather(*tasks, return_exceptions=True)
+    # Wrap each scraper with a per-vendor timeout so no single slow
+    # Playwright scraper blocks the entire gather.
+    SCRAPER_TIMEOUT = 30  # seconds per vendor
+
+    async def _scrape_with_timeout(vendor_name, scraper_inst, search_mpn):
+        try:
+            return await asyncio.wait_for(
+                scraper_inst.scrape(search_mpn), timeout=SCRAPER_TIMEOUT
+            )
+        except asyncio.TimeoutError:
+            logger.warning("%s scraper timed out after %ds", vendor_name, SCRAPER_TIMEOUT)
+            return None
+        except Exception as e:
+            logger.error("%s scraper failed: %s", vendor_name, e)
+            return None
+
+    tasks = [
+        _scrape_with_timeout(vendor, scraper, mpn)
+        for vendor, scraper in scrapers
+    ]
+    results = await asyncio.gather(*tasks)
 
     for (vendor, _), result in zip(scrapers, results):
-        if isinstance(result, Exception):
-            logger.error("%s scraper failed: %s", vendor, result)
-        elif result:
+        if result:
             logger.info("%s result: %s", vendor, result)
         else:
-            logger.warning("No %s result found", vendor)
+            logger.warning("No %s result found (or timed out)", vendor)
 
     # Log time
     elapsed = time.perf_counter() - start
     logger.info("All scrapers completed in %.2f seconds", elapsed)
 
-    return [r for r in results if not isinstance(r, Exception)]
+    return [r for r in results if r is not None]
 
 
 def read_mpns_from_csv(csv_path: str) -> List[str]:

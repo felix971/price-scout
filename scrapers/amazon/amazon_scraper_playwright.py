@@ -87,7 +87,7 @@ class AmazonScraper(BaseScraper):
                 try:
                     await page.wait_for_selector('[data-component-type="s-search-result"]', timeout=10000)
                 except Exception:
-                    await asyncio.sleep(3)
+                    pass  # proceed with whatever loaded
 
                 html = await page.content()
                 soup = BeautifulSoup(html, "lxml")
@@ -117,11 +117,11 @@ class AmazonScraper(BaseScraper):
                     # Visit product page — title match confirms MPN, otherwise validate on page
                     product_url = f"https://www.amazon.com.au/dp/{asin}"
                     try:
-                        await page.goto(product_url, wait_until="domcontentloaded", timeout=30000)
+                        await page.goto(product_url, wait_until="domcontentloaded", timeout=15000)
                         try:
                             await page.wait_for_selector('#productTitle', timeout=8000)
                         except Exception:
-                            await asyncio.sleep(3)
+                            pass  # proceed with whatever loaded
                         product_html = await page.content()
                         product_result = self._extract_from_product_page(
                             product_html, mpn, product_url, skip_validation=mpn_in_title

@@ -85,16 +85,22 @@ class CentrecomScraper(BaseScraper):
                 try:
                     await page.goto(
                         search_url,
-                        wait_until="networkidle",
-                        timeout=45000
+                        wait_until="domcontentloaded",
+                        timeout=20000
                     )
                 except Exception as nav_error:
                     logger.warning(f"Centrecom Playwright: Navigation failed for MPN={mpn}: {nav_error}")
                     await browser.close()
                     return self.not_found
 
-                # Wait for content to render
-                await asyncio.sleep(2)
+                # Wait for product content to render
+                try:
+                    await page.wait_for_selector(
+                        '[itemtype="http://schema.org/Product"], div.search2.clearfix1',
+                        timeout=8000
+                    )
+                except Exception:
+                    pass  # proceed with whatever loaded
 
                 html = await page.content()
                 current_url = page.url

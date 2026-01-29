@@ -74,9 +74,14 @@ class EbayScraper(BaseScraper):
             try:
                 await page.goto(
                     search_url,
-                    wait_until="networkidle",
-                    timeout=120000
+                    wait_until="domcontentloaded",
+                    timeout=30000
                 )
+                # Wait for search results to render instead of networkidle
+                try:
+                    await page.wait_for_selector("li.s-item", timeout=10000)
+                except Exception:
+                    pass  # proceed with whatever loaded
             except Exception as e:
                 logger.warning("eBay AU (Playwright): Search page failed to load: %s", e)
                 await browser.close()

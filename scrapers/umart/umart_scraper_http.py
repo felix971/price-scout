@@ -116,14 +116,37 @@ class UmartScraper(BaseScraper):
                         )
                         return self.not_found
                     else:
-                        price_text = price_text.get_text(strip=True)
+                        price = float(price_text.get_text(strip=True))
+
+                    # 5. Check Stock Status
+                    in_stock = False
+                    stock_msg = "Unknown"
+                    stock_elem = page_soup.select_one("div.goods-stock") or page_soup.select_one(".goods_stock")
+                    
+                    if stock_elem:
+                        stock_text = stock_elem.get_text(strip=True)
+                        if "In Stock" in stock_text:
+                            in_stock = True
+                            stock_msg = "In Stock"
+                        elif "Out of Stock" in stock_text:
+                            in_stock = False
+                            stock_msg = "Out of Stock"
+                        elif "Pre-Order" in stock_text:
+                            in_stock = True
+                            stock_msg = "Pre-Order"
+                        else:
+                            stock_msg = stock_text
+                            if "In Stock" in stock_text: # Double check
+                                in_stock = True
 
                     return PriceResult(
                         vendor_id=self.vendor_id,
                         mpn=mpn,
-                        price=float(price_text),
+                        price=price,
                         currency=self.currency,
                         url=product_url,
+                        in_stock=in_stock,
+                        condition=f"New ({stock_msg})" if in_stock else "New",
                         found=True
                     )
                 else:

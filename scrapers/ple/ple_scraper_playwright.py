@@ -81,16 +81,13 @@ class PLEScraper(BaseScraper):
                 try:
                     await page.goto(
                         search_url,
-                        wait_until="networkidle",
-                        timeout=45000
+                        wait_until="domcontentloaded",
+                        timeout=20000
                     )
                 except Exception as nav_error:
                     logger.warning(f"PLE Playwright: Navigation failed for MPN={mpn}: {nav_error}")
                     await browser.close()
                     return self.not_found
-
-                # Wait for React to render search results
-                await asyncio.sleep(3)
 
                 # Try to wait for product cards to appear
                 try:
@@ -135,8 +132,12 @@ class PLEScraper(BaseScraper):
 
                     # Visit product page to check MPN
                     try:
-                        await page.goto(product_url, wait_until="networkidle", timeout=30000)
-                        await asyncio.sleep(1)
+                        await page.goto(product_url, wait_until="domcontentloaded", timeout=15000)
+                        # Wait for JSON-LD script to be present
+                        try:
+                            await page.wait_for_selector('script[type="application/ld+json"]', timeout=5000)
+                        except Exception:
+                            pass
                         product_html = await page.content()
 
                         result = self._extract_from_product_page(product_html, mpn, product_url)

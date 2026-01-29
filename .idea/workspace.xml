@@ -4,20 +4,16 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="f49f1f88-9e35-4013-9fa9-4f5b2e80ef1e" name="Changes" comment="devicedeal scraper bug fixed">
-      <change afterPath="$PROJECT_DIR$/.idea/inspectionProfiles/profiles_settings.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.idea/misc.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.idea/price-scout.iml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.idea/shelf/Uncommitted_changes_before_Checkout_at_27_1_2026_PM8_15_[Changes]/shelved.patch" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.idea/shelf/Uncommitted_changes_before_Checkout_at_27_1_2026_PM8_15__Changes_.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.idea/shelf/Uncommitted_changes_before_Update_at_22_1_2026_PM9_11_[Changes]/shelved.patch" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.idea/shelf/Uncommitted_changes_before_Update_at_22_1_2026_PM9_11__Changes_.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.idea/vcs.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app.py" beforeDir="false" afterPath="$PROJECT_DIR$/app.py" afterDir="false" />
+    <list default="true" id="f49f1f88-9e35-4013-9fa9-4f5b2e80ef1e" name="Changes" comment="bug fixed">
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/models/base_scraper.py" beforeDir="false" afterPath="$PROJECT_DIR$/models/base_scraper.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/scraper.py" beforeDir="false" afterPath="$PROJECT_DIR$/scraper.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/scrapers/amazon/amazon_scraper_http.py" beforeDir="false" afterPath="$PROJECT_DIR$/scrapers/amazon/amazon_scraper_http.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/scrapers/amazon/amazon_scraper_playwright.py" beforeDir="false" afterPath="$PROJECT_DIR$/scrapers/amazon/amazon_scraper_playwright.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/scrapers/centrecom/centrecom_scraper_playwright.py" beforeDir="false" afterPath="$PROJECT_DIR$/scrapers/centrecom/centrecom_scraper_playwright.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/scrapers/ebay/ebay_scraper_playwright.py" beforeDir="false" afterPath="$PROJECT_DIR$/scrapers/ebay/ebay_scraper_playwright.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/scrapers/pbtech/pbtech_scraper_playwright.py" beforeDir="false" afterPath="$PROJECT_DIR$/scrapers/pbtech/pbtech_scraper_playwright.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/scrapers/ple/ple_scraper_playwright.py" beforeDir="false" afterPath="$PROJECT_DIR$/scrapers/ple/ple_scraper_playwright.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/scrapers/umart/umart_scraper_http.py" beforeDir="false" afterPath="$PROJECT_DIR$/scrapers/umart/umart_scraper_http.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -45,7 +41,7 @@
   <component name="Git.Settings">
     <option name="RECENT_BRANCH_BY_REPOSITORY">
       <map>
-        <entry key="$PROJECT_DIR$" value="main" />
+        <entry key="$PROJECT_DIR$" value="side_branch" />
       </map>
     </option>
     <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
@@ -58,22 +54,22 @@
     &quot;assignee&quot;: &quot;felix971&quot;
   }
 }</component>
-  <component name="GithubPullRequestsUISettings">{
-  &quot;selectedUrlAndAccountId&quot;: {
-    &quot;url&quot;: &quot;https://github.com/michaelwsd/price-scout.git&quot;,
-    &quot;accountId&quot;: &quot;0932ba8b-59a0-4c77-9f1a-7b4f9ac46962&quot;
+  <component name="GithubPullRequestsUISettings"><![CDATA[{
+  "selectedUrlAndAccountId": {
+    "url": "https://github.com/felix971/price-scout.git",
+    "accountId": "0932ba8b-59a0-4c77-9f1a-7b4f9ac46962"
   },
-  &quot;recentNewPullRequestHead&quot;: {
-    &quot;server&quot;: {
-      &quot;useHttp&quot;: false,
-      &quot;host&quot;: &quot;github.com&quot;,
-      &quot;port&quot;: null,
-      &quot;suffix&quot;: null
+  "recentNewPullRequestHead": {
+    "server": {
+      "useHttp": false,
+      "host": "github.com",
+      "port": null,
+      "suffix": null
     },
-    &quot;owner&quot;: &quot;michaelwsd&quot;,
-    &quot;repository&quot;: &quot;price-scout&quot;
+    "owner": "michaelwsd",
+    "repository": "price-scout"
   }
-}</component>
+}]]></component>
   <component name="HighlightingSettingsPerFile">
     <setting file="file:///Library/Frameworks/Python.framework/Versions/3.13/lib/python3.13/site-packages/playwright/_impl/_connection.py" root0="SKIP_INSPECTION" />
   </component>
@@ -94,7 +90,7 @@
     "RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252": "true",
     "RunOnceActivity.git.unshallow": "true",
     "ToolWindow.Terminal.ShowToolbar": "false",
-    "git-widget-placeholder": "side__branch",
+    "git-widget-placeholder": "batch-scraper",
     "node.js.detected.package.eslint": "true",
     "node.js.detected.package.tslint": "true",
     "node.js.selected.package.eslint": "(autodetect)",
@@ -104,6 +100,12 @@
     "vue.rearranger.settings.migration": "true"
   }
 }]]></component>
+  <component name="RecentsManager">
+    <key name="MoveFile.RECENT_KEYS">
+      <recent name="$PROJECT_DIR$/.claude/skills/systematic-debugging" />
+      <recent name="$PROJECT_DIR$/.claude/skills" />
+    </key>
+  </component>
   <component name="SharedIndexes">
     <attachedChunks>
       <set>
@@ -121,7 +123,7 @@
       <updated>1766475682484</updated>
       <workItem from="1766475683721" duration="58439000" />
       <workItem from="1768970619400" duration="15310000" />
-      <workItem from="1769505180039" duration="10271000" />
+      <workItem from="1769505180039" duration="26973000" />
     </task>
     <task id="LOCAL-00001" summary="upload">
       <option name="closed" value="true" />
@@ -227,7 +229,39 @@
       <option name="project" value="LOCAL" />
       <updated>1769526919508</updated>
     </task>
-    <option name="localTasksCounter" value="14" />
+    <task id="LOCAL-00014" summary="devicedeal scraper bug fixed">
+      <option name="closed" value="true" />
+      <created>1769575113403</created>
+      <option name="number" value="00014" />
+      <option name="presentableId" value="LOCAL-00014" />
+      <option name="project" value="LOCAL" />
+      <updated>1769575113403</updated>
+    </task>
+    <task id="LOCAL-00015" summary="bug fixed">
+      <option name="closed" value="true" />
+      <created>1769594553085</created>
+      <option name="number" value="00015" />
+      <option name="presentableId" value="LOCAL-00015" />
+      <option name="project" value="LOCAL" />
+      <updated>1769594553085</updated>
+    </task>
+    <task id="LOCAL-00016" summary="bug fixed">
+      <option name="closed" value="true" />
+      <created>1769604945288</created>
+      <option name="number" value="00016" />
+      <option name="presentableId" value="LOCAL-00016" />
+      <option name="project" value="LOCAL" />
+      <updated>1769604945288</updated>
+    </task>
+    <task id="LOCAL-00017" summary="bug fixed">
+      <option name="closed" value="true" />
+      <created>1769634668055</created>
+      <option name="number" value="00017" />
+      <option name="presentableId" value="LOCAL-00017" />
+      <option name="project" value="LOCAL" />
+      <updated>1769634668055</updated>
+    </task>
+    <option name="localTasksCounter" value="18" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -267,7 +301,8 @@
     <MESSAGE value="adding scrapers" />
     <MESSAGE value="adding amazon scraper" />
     <MESSAGE value="devicedeal scraper bug fixed" />
-    <option name="LAST_COMMIT_MESSAGE" value="devicedeal scraper bug fixed" />
+    <MESSAGE value="bug fixed" />
+    <option name="LAST_COMMIT_MESSAGE" value="bug fixed" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>

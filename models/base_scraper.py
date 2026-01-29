@@ -82,40 +82,52 @@ class BaseScraper(BaseModel, ABC):
         """
 
 
-async def parallel_scrape(scrapers, mpn: str, vendor_name: str, not_found: PriceResult) -> PriceResult:
+async def parallel_scrape(
+    scrapers, mpn: str, vendor_name: str, not_found: PriceResult,
+    timeout: float = 30.0,
+) -> PriceResult:
     """
     Run multiple scrapers in parallel, return the first successful result.
 
-    Launches all scrapers concurrently. As each completes, checks if it
-    found a result. The first scraper to return found=True wins, and
-    remaining scrapers are cancelled.
+    Launches all scrapers concurrently with a per-scraper timeout. As each
+    completes, checks if it found a result. The first scraper to return
+    found=True wins, and remaining scrapers are cancelled.
 
     Args:
         scrapers: List of scraper instances to run in parallel.
         mpn: Manufacturer Part Number to search for.
         vendor_name: Vendor name for logging.
         not_found: Default PriceResult to return if no scraper finds a result.
+        timeout: Maximum seconds to wait for each scraper (default 30).
 
     Returns:
         PriceResult from the first scraper that finds the product.
     """
-    tasks = [asyncio.create_task(s.scrape(mpn)) for s in scrapers]
+
+    async def _with_timeout(scraper):
+        try:
+            return await asyncio.wait_for(scraper.scrape(mpn), timeout=timeout)
+        except asyncio.TimeoutError:
+            logger.warning(f"{vendor_name}: Scraper timed out for MPN={mpn}")
+            return not_found
+        except Exception as e:
+            logger.warning(f"{vendor_name}: Scraper failed for MPN={mpn}: {e}")
+            return not_found
+
+    tasks = [asyncio.create_task(_with_timeout(s)) for s in scrapers]
     remaining = set(tasks)
 
     while remaining:
         done, remaining = await asyncio.wait(remaining, return_when=asyncio.FIRST_COMPLETED)
         for task in done:
-            try:
-                result = task.result()
-                if result.found:
-                    logger.info(f"{vendor_name}: Found result for MPN={mpn}")
-                    for t in remaining:
-                        t.cancel()
-                    if remaining:
-                        await asyncio.gather(*remaining, return_exceptions=True)
-                    return result
-            except Exception as e:
-                logger.warning(f"{vendor_name}: Scraper failed for MPN={mpn}: {e}")
+            result = task.result()
+            if result.found:
+                logger.info(f"{vendor_name}: Found result for MPN={mpn}")
+                for t in remaining:
+                    t.cancel()
+                if remaining:
+                    await asyncio.gather(*remaining, return_exceptions=True)
+                return result
 
     logger.info(f"{vendor_name}: No result found for MPN={mpn}")
     return not_found
