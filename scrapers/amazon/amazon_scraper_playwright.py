@@ -1,36 +1,24 @@
 """
 Amazon Australia Playwright Scraper.
 
-This module implements a web scraper for Amazon Australia using Playwright
-browser automation as a fallback for when HTTP scraping fails.
-
-Classes:
-    AmazonScraper: Playwright-based scraper for www.amazon.com.au
+This module implements a web scraper for Amazon Australia using Shared Playwright Browser.
+Optimized for speed by reusing browser instances and blocking images/media.
 """
 
-import asyncio
 import logging
 import re
-from playwright.async_api import async_playwright
 from bs4 import BeautifulSoup
 
 from models.models import PriceResult
 from models.base_scraper import BaseScraper
+from utils.playwright_manager import PlaywrightManager
 
 logger = logging.getLogger(__name__)
 
 
 class AmazonScraper(BaseScraper):
     """
-    Playwright-based web scraper for Amazon Australia.
-
-    Uses headless Chromium to render the page. This is used as a
-    fallback when the HTTP scraper fails.
-
-    Attributes:
-        vendor_id: Identifier "amazon_au"
-        currency: "AUD" (Australian Dollar)
-        not_found: Default PriceResult for products not found
+    Playwright-based web scraper for Amazon Australia using Shared Browser.
     """
 
     vendor_id: str = "amazon_au"
@@ -46,109 +34,100 @@ class AmazonScraper(BaseScraper):
 
     async def scrape(self, mpn: str) -> PriceResult:
         """
-        Scrape price data for a given MPN from Amazon Australia using Playwright.
-
-        Args:
-            mpn: Manufacturer Part Number to search for.
-
-        Returns:
-            PriceResult with product data if found, otherwise not_found.
+        Scrape price data for a given MPN from Amazon Australia using Shared Playwright.
         """
         search_url = f"https://www.amazon.com.au/s?k={mpn}"
-
-        logger.info(f"Amazon AU Playwright: Searching for MPN={mpn}")
+        
+        page = None
+        context = None
 
         try:
-            async with async_playwright() as p:
-                browser = await p.chromium.launch(headless=True)
-                context = await browser.new_context(
-                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                    viewport={"width": 1920, "height": 1080}
+            # Use Shared Browser Manager (Auto-blocks images/fonts for speed)
+            page, context = await PlaywrightManager.get_page()
+
+            logger.info(f"Amazon AU (Playwright): Searching for MPN={mpn}")
+
+            try:
+                await page.goto(
+                    search_url,
+                    wait_until="domcontentloaded",
+                    timeout=30000
                 )
-
-                await context.add_init_script("""
-                    Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
-                """)
-
-                page = await context.new_page()
-
+                
+                # Wait for search results
                 try:
-                    await page.goto(
-                        search_url,
-                        wait_until="domcontentloaded",
-                        timeout=45000
-                    )
-                except Exception as nav_error:
-                    logger.warning(f"Amazon AU Playwright: Navigation failed: {nav_error}")
-                    await browser.close()
-                    return self.not_found
-
-                # Wait for JS-rendered search results
-                try:
-                    await page.wait_for_selector('[data-component-type="s-search-result"]', timeout=10000)
+                    await page.wait_for_selector('[data-component-type="s-search-result"]', timeout=8000)
                 except Exception:
-                    pass  # proceed with whatever loaded
+                    pass 
 
-                html = await page.content()
-                soup = BeautifulSoup(html, "lxml")
-
-                # Find search results
-                results = soup.select('[data-component-type="s-search-result"]')
-                if not results:
-                    logger.info(f"Amazon AU Playwright: No search results for MPN={mpn}")
-                    await browser.close()
-                    return self.not_found
-
-                # Collect all matching results, then return cheapest
-                candidates = []
-
-                for result in results[:5]:
-                    asin = result.get("data-asin", "")
-                    if not asin:
-                        continue
-
-                    # Check if MPN appears in title (quick filter)
-                    mpn_in_title = False
-                    title_elem = result.select_one("h2 span")
-                    if title_elem:
-                        title = title_elem.get_text(strip=True)
-                        mpn_in_title = mpn.upper() in title.upper()
-
-                    # Visit product page — title match confirms MPN, otherwise validate on page
-                    product_url = f"https://www.amazon.com.au/dp/{asin}"
-                    try:
-                        await page.goto(product_url, wait_until="domcontentloaded", timeout=15000)
-                        try:
-                            await page.wait_for_selector('#productTitle', timeout=8000)
-                        except Exception:
-                            pass  # proceed with whatever loaded
-                        product_html = await page.content()
-                        product_result = self._extract_from_product_page(
-                            product_html, mpn, product_url, skip_validation=mpn_in_title
-                        )
-                        if product_result.found:
-                            candidates.append(product_result)
-                    except Exception:
-                        # Fallback: use search result price if product page fails
-                        if mpn_in_title:
-                            sr_result = self._extract_from_search_result(result, mpn, asin)
-                            if sr_result.found:
-                                candidates.append(sr_result)
-                        continue
-
-                if candidates:
-                    best = min(candidates, key=lambda r: r.price)
-                    logger.info(f"Amazon AU Playwright: Best price for MPN={mpn}: ${best.price} from {len(candidates)} candidates")
-                    await browser.close()
-                    return best
-
-                logger.info(f"Amazon AU Playwright: No exact match found for MPN={mpn}")
-                await browser.close()
+            except Exception as nav_error:
+                logger.warning(f"Amazon AU (Playwright): Navigation failed: {nav_error}")
                 return self.not_found
 
-        except Exception as e:
-            logger.error(f"Amazon AU Playwright: Error for MPN={mpn}: {e}")
+            html = await page.content()
+            soup = BeautifulSoup(html, "lxml")
+
+            # Find search results
+            results = soup.select('[data-component-type="s-search-result"]')
+            if not results:
+                logger.info(f"Amazon AU (Playwright): No search results for MPN={mpn}")
+                return self.not_found
+
+            # Collect all matching results, then return cheapest
+            candidates = []
+
+            # Amazon often returns unrelated sponsored items first, so check top 5
+            for result in results[:5]:
+                asin = result.get("data-asin", "")
+                if not asin:
+                    continue
+
+                # Check if MPN appears in title (quick filter)
+                mpn_in_title = False
+                title_elem = result.select_one("h2 span")
+                if title_elem:
+                    title = title_elem.get_text(strip=True)
+                    mpn_in_title = mpn.upper() in title.upper()
+
+                # Visit product page — title match confirms MPN, otherwise validate on page
+                product_url = f"https://www.amazon.com.au/dp/{asin}"
+                try:
+                    await page.goto(product_url, wait_until="domcontentloaded", timeout=15000)
+                    try:
+                        await page.wait_for_selector('#productTitle', timeout=5000)
+                    except Exception:
+                        pass
+                        
+                    product_html = await page.content()
+                    product_result = self._extract_from_product_page(
+                        product_html, mpn, product_url, skip_validation=mpn_in_title
+                    )
+                    if product_result.found:
+                        candidates.append(product_result)
+                        
+                except Exception:
+                    # Fallback: use search result price if product page fails
+                    if mpn_in_title:
+                        sr_result = self._extract_from_search_result(result, mpn, asin)
+                        if sr_result.found:
+                            candidates.append(sr_result)
+                    continue
+
+            if candidates:
+                best = min(candidates, key=lambda r: r.price)
+                logger.info(f"Amazon AU (Playwright): Best price for MPN={mpn}: ${best.price}")
+                return best
+
+            logger.info(f"Amazon AU (Playwright): No exact match found for MPN={mpn}")
             return self.not_found
+
+        except Exception as e:
+            logger.error(f"Amazon AU (Playwright): Critical error: {e}")
+            return self.not_found
+        
+        finally:
+            if page and context:
+                await PlaywrightManager.close_page(context, page)
 
     def _extract_from_search_result(self, result, mpn: str, asin: str) -> PriceResult:
         """Extract product data from search result."""
@@ -160,7 +139,7 @@ class AmazonScraper(BaseScraper):
             if price_elem:
                 price = self._parse_price(price_elem.get_text(strip=True))
 
-            # Method 2: Non-featured offer price ("No featured offers available" + price)
+            # Method 2: Non-featured offer price
             if price is None:
                 no_featured = result.find(string=lambda s: s and "no featured" in s.lower())
                 if no_featured:
@@ -175,8 +154,6 @@ class AmazonScraper(BaseScraper):
 
             product_url = f"https://www.amazon.com.au/dp/{asin}"
 
-            logger.info(f"Amazon AU Playwright: Found MPN={mpn} in search, price=${price}")
-
             return PriceResult(
                 vendor_id=self.vendor_id,
                 url=product_url,
@@ -189,7 +166,6 @@ class AmazonScraper(BaseScraper):
             )
 
         except Exception as e:
-            logger.error(f"Amazon AU Playwright: Error extracting from search: {e}")
             return self.not_found
 
     def _extract_from_product_page(self, html: str, mpn: str, product_url: str, skip_validation: bool = False) -> PriceResult:
@@ -208,8 +184,7 @@ class AmazonScraper(BaseScraper):
 
             # Extract availability
             in_stock = self._extract_availability(soup)
-
-            logger.info(f"Amazon AU Playwright: Found MPN={mpn}, price=${price}")
+            stock_msg = "In Stock" if in_stock else "Out of Stock"
 
             return PriceResult(
                 vendor_id=self.vendor_id,
@@ -218,12 +193,11 @@ class AmazonScraper(BaseScraper):
                 price=price,
                 currency=self.currency,
                 in_stock=in_stock,
-                condition="New",
+                condition=f"New ({stock_msg})" if in_stock else "New",
                 found=True
             )
 
         except Exception as e:
-            logger.error(f"Amazon AU Playwright: Error extracting from product page: {e}")
             return self.not_found
 
     def _validate_mpn(self, soup: BeautifulSoup, mpn: str) -> bool:

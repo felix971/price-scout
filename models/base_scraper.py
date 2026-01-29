@@ -10,6 +10,7 @@ Classes:
 
 import asyncio
 import logging
+import typing
 from abc import ABC, abstractmethod
 from pydantic import BaseModel
 from .models import PriceResult
@@ -53,7 +54,7 @@ class BaseScraper(BaseModel, ABC):
         arbitrary_types_allowed = True
 
     @abstractmethod
-    async def scrape(self, mpn: str) -> PriceResult:
+    async def scrape(self, mpn: str, session: typing.Any = None) -> PriceResult:
         """
         Extract price and metadata for a given MPN from the vendor's website.
 
@@ -62,6 +63,7 @@ class BaseScraper(BaseModel, ABC):
 
         Args:
             mpn: Manufacturer Part Number to search for.
+            session: Optional AsyncSession (curl_cffi or aiohttp) for connection reuse.
 
         Returns:
             PriceResult object containing:

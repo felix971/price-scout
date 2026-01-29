@@ -152,19 +152,21 @@ class AsyncBatchScraper:
         Consumes MPNs from the queue and launches concurrent scrape tasks.
         Uses a Semaphore to limit concurrency per vendor.
         """
+        import random
         semaphore = asyncio.Semaphore(self.concurrency)
         pending_tasks = set()
 
         async def _bounded_scrape(task_mpn):
             async with semaphore:
                 try:
-                    # Randomize delay slightly to appear more human-like? 
-                    # await asyncio.sleep(random.uniform(0.1, 0.5))
+                    # Add random jitter delay (0.5 to 1.5 seconds) 
+                    # to prevent synchronized spikes across all vendors
+                    await asyncio.sleep(random.uniform(0.5, 1.5))
                     
                     # Scrape with timeout
                     result = await asyncio.wait_for(scraper_inst.scrape(task_mpn), timeout=60.0)
                 except Exception as e:
-                    # logger.warning(f"{vendor_name} error for {task_mpn}: {e}") 
+                    logger.warning(f"{vendor_name} error for {task_mpn}: {e}") 
                     result = None 
                 
                 await self.results_queue.put({
@@ -178,9 +180,6 @@ class AsyncBatchScraper:
             # Get next MPN from queue
             mpn = await queue.get()
             
-            # Launch a background task for this scrape (guarded by semaphore inside)
-            # IMPORTANT: We do not await here, so we can pick up the next MPN immediately
-            # and let the semaphore handle the blocking/throttling.
             task = asyncio.create_task(_bounded_scrape(mpn))
             pending_tasks.add(task)
             task.add_done_callback(pending_tasks.discard)

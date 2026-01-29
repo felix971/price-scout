@@ -1,42 +1,24 @@
 """
 Centrecom Playwright Scraper.
 
-This module implements a web scraper for Centrecom using Playwright browser
-automation to handle JavaScript-rendered content and Cloudflare protection.
-
-Classes:
-    CentrecomScraper: Playwright-based scraper for www.centrecom.com.au
+This module implements a web scraper for Centrecom using Shared Playwright Browser.
+Optimized for speed by reusing browser instances and blocking images/media.
 """
 
-import asyncio
 import logging
 import re
-from playwright.async_api import async_playwright
 from bs4 import BeautifulSoup
 
 from models.models import PriceResult
 from models.base_scraper import BaseScraper
+from utils.playwright_manager import PlaywrightManager
 
 logger = logging.getLogger(__name__)
 
 
 class CentrecomScraper(BaseScraper):
     """
-    Playwright-based web scraper for Centrecom Australia.
-
-    Uses headless Chromium browser to fully render JavaScript content
-    and bypass bot detection. This is the fallback scraper when HTTP
-    methods fail.
-
-    Attributes:
-        vendor_id: Identifier "centrecom"
-        currency: "AUD" (Australian Dollar)
-        not_found: Default PriceResult for products not found
-
-    Example:
-        >>> scraper = CentrecomScraper()
-        >>> result = await scraper.scrape("AT-RCABBK200PCIE4RTX")
-        >>> print(f"Found at: {result.url}")
+    Playwright-based web scraper for Centrecom Australia using Shared Browser.
     """
 
     vendor_id: str = "centrecom"
@@ -52,93 +34,68 @@ class CentrecomScraper(BaseScraper):
 
     async def scrape(self, mpn: str) -> PriceResult:
         """
-        Scrape price data for a given MPN from Centrecom using Playwright.
-
-        Launches a headless browser, navigates to the search page, waits for
-        content to load, then extracts product data.
-
-        Args:
-            mpn: Manufacturer Part Number to search for.
-
-        Returns:
-            PriceResult with complete product data if found, otherwise not_found.
+        Scrape price data for a given MPN from Centrecom using Shared Playwright.
         """
         search_url = f"https://www.centrecom.com.au/search/{mpn}"
-
-        logger.info(f"Centrecom Playwright: Searching for MPN={mpn}")
+        
+        page = None
+        context = None
 
         try:
-            async with async_playwright() as p:
-                browser = await p.chromium.launch(headless=True)
-                context = await browser.new_context(
-                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                    viewport={"width": 1920, "height": 1080}
+            # Use Shared Browser Manager (Auto-blocks images/fonts for speed)
+            page, context = await PlaywrightManager.get_page()
+
+            logger.info(f"Centrecom (Playwright): Searching for MPN={mpn}")
+
+            try:
+                await page.goto(
+                    search_url,
+                    wait_until="domcontentloaded",
+                    timeout=20000
                 )
-
-                # Add stealth script to avoid detection
-                await context.add_init_script("""
-                    Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
-                """)
-
-                page = await context.new_page()
-
-                try:
-                    await page.goto(
-                        search_url,
-                        wait_until="domcontentloaded",
-                        timeout=20000
-                    )
-                except Exception as nav_error:
-                    logger.warning(f"Centrecom Playwright: Navigation failed for MPN={mpn}: {nav_error}")
-                    await browser.close()
-                    return self.not_found
-
-                # Wait for product content to render
+                
+                # Wait for product content
                 try:
                     await page.wait_for_selector(
                         '[itemtype="http://schema.org/Product"], div.search2.clearfix1',
-                        timeout=8000
+                        timeout=5000
                     )
                 except Exception:
-                    pass  # proceed with whatever loaded
+                    pass
 
-                html = await page.content()
-                current_url = page.url
-                await browser.close()
+            except Exception as nav_error:
+                logger.warning(f"Centrecom (Playwright): Navigation failed: {nav_error}")
+                return self.not_found
 
-                # Check for error page
-                if "403 Forbidden" in html or len(html) < 2000:
-                    logger.warning(f"Centrecom Playwright: Blocked or error for MPN={mpn}")
-                    return self.not_found
+            html = await page.content()
+            current_url = page.url
+            
+            # Check for error page
+            if "403 Forbidden" in html or len(html) < 2000:
+                logger.warning(f"Centrecom (Playwright): Blocked or error for MPN={mpn}")
+                return self.not_found
 
-                soup = BeautifulSoup(html, "lxml")
+            soup = BeautifulSoup(html, "lxml")
 
-                # Check if we're on a product detail page
-                product_schema = soup.select_one('[itemtype="http://schema.org/Product"]')
+            # Check if we're on a product detail page
+            product_schema = soup.select_one('[itemtype="http://schema.org/Product"]')
 
-                if product_schema:
-                    return self._parse_product_page(soup, mpn, current_url)
-                else:
-                    return self._parse_search_results(soup, mpn)
+            if product_schema:
+                return self._parse_product_page(soup, mpn, current_url)
+            else:
+                return self._parse_search_results(soup, mpn)
 
         except Exception as e:
-            logger.error(f"Centrecom Playwright: Error for MPN={mpn}: {e}")
+            logger.error(f"Centrecom (Playwright): Critical error: {e}")
             return self.not_found
+        
+        finally:
+            if page and context:
+                await PlaywrightManager.close_page(context, page)
 
     def _parse_product_page(self, soup: BeautifulSoup, mpn: str, page_url: str) -> PriceResult:
-        """
-        Parse product details from a product detail page.
-
-        Args:
-            soup: BeautifulSoup object of the page
-            mpn: The MPN being searched for
-            page_url: The URL of the product page
-
-        Returns:
-            PriceResult with product data or not_found
-        """
+        """Parse product details from a product detail page."""
         try:
-            # Get SKU from Schema.org meta tag or visible element
             sku_meta = soup.select_one('meta[itemprop="sku"]')
             if sku_meta:
                 found_sku = sku_meta.get("content", "").strip()
@@ -147,15 +104,11 @@ class CentrecomScraper(BaseScraper):
                 if sku_elem:
                     found_sku = sku_elem.get_text(strip=True)
                 else:
-                    logger.warning(f"Centrecom Playwright: No SKU on product page for MPN={mpn}")
                     return self.not_found
 
-            # Validate MPN match (case-insensitive)
             if found_sku.lower() != mpn.lower():
-                logger.info(f"Centrecom Playwright: SKU mismatch: {found_sku} != {mpn}")
                 return self.not_found
 
-            # Get price
             price_meta = soup.select_one('meta[itemprop="price"]')
             if price_meta:
                 price = float(price_meta.get("content", "0"))
@@ -165,27 +118,20 @@ class CentrecomScraper(BaseScraper):
                     price_text = price_elem.get_text(strip=True)
                     price = float(re.sub(r'[^\d.]', '', price_text))
                 else:
-                    logger.warning(f"Centrecom Playwright: No price for MPN={mpn}")
                     return self.not_found
 
-            # Get availability
             availability_meta = soup.select_one('meta[itemprop="availability"]')
             in_stock = None
             if availability_meta:
                 avail_content = availability_meta.get("content", "")
                 in_stock = "InStock" in avail_content
 
-            # Get condition
             condition_meta = soup.select_one('meta[itemprop="itemCondition"]')
             condition = "New"
             if condition_meta:
                 cond_content = condition_meta.get("content", "")
-                if "Used" in cond_content:
-                    condition = "Used"
-                elif "Refurbished" in cond_content:
-                    condition = "Refurbished"
-
-            logger.info(f"Centrecom Playwright: Found product MPN={mpn}, price=${price}")
+                if "Used" in cond_content: condition = "Used"
+                elif "Refurbished" in cond_content: condition = "Refurbished"
 
             return PriceResult(
                 vendor_id=self.vendor_id,
@@ -198,30 +144,14 @@ class CentrecomScraper(BaseScraper):
                 found=True
             )
 
-        except Exception as e:
-            logger.error(f"Centrecom Playwright: Error parsing product page for MPN={mpn}: {e}")
+        except Exception:
             return self.not_found
 
     def _parse_search_results(self, soup: BeautifulSoup, mpn: str) -> PriceResult:
-        """
-        Parse search results page to find matching product.
-
-        Only matches products where the MPN appears in the title (usually in
-        brackets at the end like "[SKU-VALUE]"), NOT in the URL.
-
-        Args:
-            soup: BeautifulSoup object of the search page
-            mpn: The MPN being searched for
-
-        Returns:
-            PriceResult with product data or not_found
-        """
+        """Parse search results page."""
         try:
-            # Find all search result items
             products = soup.select("div.search2.clearfix1")
-
             if not products:
-                logger.info(f"Centrecom Playwright: No search results for MPN={mpn}")
                 return self.not_found
 
             mpn_lower = mpn.lower()
@@ -234,37 +164,23 @@ class CentrecomScraper(BaseScraper):
                 title = title_link.get_text(strip=True)
                 href = title_link.get("href", "")
 
-                # First check: Look for MPN in brackets (most reliable)
                 sku_match = re.search(r'\[([^\]]+)\]', title)
                 if sku_match:
                     found_sku = sku_match.group(1)
                     if found_sku.lower() == mpn_lower:
                         return self._extract_search_result(product, href, found_sku)
 
-                # Second check: Look for MPN in title text (NOT URL)
                 if mpn_lower in title.lower():
                     found_sku = sku_match.group(1) if sku_match else mpn
                     return self._extract_search_result(product, href, found_sku)
 
-            logger.info(f"Centrecom Playwright: No exact match for MPN={mpn}")
             return self.not_found
 
-        except Exception as e:
-            logger.error(f"Centrecom Playwright: Error parsing search for MPN={mpn}: {e}")
+        except Exception:
             return self.not_found
 
     def _extract_search_result(self, product, href: str, found_sku: str) -> PriceResult:
-        """
-        Extract price and stock data from a search result product element.
-
-        Args:
-            product: BeautifulSoup element of the product
-            href: Product page URL path
-            found_sku: The SKU/MPN found in the title
-
-        Returns:
-            PriceResult with product data or not_found
-        """
+        """Extract price and stock data from a search result product element."""
         try:
             price_elem = product.select_one(".search2_price")
             if not price_elem:
@@ -281,8 +197,6 @@ class CentrecomScraper(BaseScraper):
             elif product.select_one(".search2_instore"):
                 in_stock = None
 
-            logger.info(f"Centrecom Playwright: Found MPN={found_sku}, price=${price}")
-
             return PriceResult(
                 vendor_id=self.vendor_id,
                 url=product_url,
@@ -294,6 +208,5 @@ class CentrecomScraper(BaseScraper):
                 found=True
             )
 
-        except Exception as e:
-            logger.error(f"Centrecom Playwright: Error extracting search result: {e}")
+        except Exception:
             return self.not_found

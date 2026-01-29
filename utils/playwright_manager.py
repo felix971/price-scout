@@ -17,6 +17,14 @@ class PlaywrightManager:
         Get a new page from the shared browser instance.
         Starts the browser if it's not running.
         """
+        import random
+        ua_list = [
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36 Edge/130.0.0.0",
+        ]
+
         async with cls._lock:
             if cls._browser is None:
                 logger.info("🚀 Starting Shared Playwright Browser...")
@@ -26,7 +34,7 @@ class PlaywrightManager:
             cls._active_users += 1
             
         context = await cls._browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            user_agent=random.choice(ua_list),
             viewport={"width": 1920, "height": 1080}
         )
         
@@ -36,6 +44,16 @@ class PlaywrightManager:
         """)
         
         page = await context.new_page()
+        
+        # Block unnecessary resources to speed up loading
+        async def route_intercept(route):
+            if route.request.resource_type in ["image", "media", "font", "stylesheet"]:
+                await route.abort()
+            else:
+                await route.continue_()
+                
+        await page.route("**/*", route_intercept)
+        
         return page, context
 
     @classmethod

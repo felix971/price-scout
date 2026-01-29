@@ -34,14 +34,24 @@ class PCCaseGearScraper(BaseScraper):
         found=False
     )
 
-    async def scrape(self, mpn: str) -> PriceResult:
+    async def scrape(self, mpn: str, session: AsyncSession = None) -> PriceResult:
         url = f"https://{self.APP_ID}-dsn.algolia.net/1/indexes/{self.INDEX_NAME}/query"
         
         headers = {
             "x-algolia-api-key": self.API_KEY,
             "x-algolia-application-id": self.APP_ID,
             "content-type": "application/json",
-            "referer": "https://www.pccasegear.com/"
+            "accept": "*/*",
+            "accept-language": "en-AU,en;q=0.9",
+            "origin": "https://www.pccasegear.com",
+            "referer": "https://www.pccasegear.com/",
+            "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+            "sec-ch-ua": '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
+            "sec-ch-ua-mobile": "?0",
+            "sec-ch-ua-platform": '"macOS"',
+            "sec-fetch-dest": "empty",
+            "sec-fetch-mode": "cors",
+            "sec-fetch-site": "cross-site"
         }
         
         payload = {
@@ -55,83 +65,97 @@ class PCCaseGearScraper(BaseScraper):
             ]
         }
 
+        s = session if session else AsyncSession()
+
         try:
-            async with AsyncSession() as s:
+            resp = await s.post(url, headers=headers, json=payload)
+            
+            if resp.status_code != 200:
+                logger.warning(f"PCCG API error: {resp.status_code}")
+                return self.not_found
+            
+            data = resp.json()
+            hits = data.get('hits', [])
+            
+            # Retry with cleaned query if no hits and query has special chars
+            if not hits and ("/" in mpn or "-" in mpn):
+                alt_query = mpn.replace("/", " ").replace("-", " ")
+                payload["query"] = alt_query
+                logger.info(f"PCCG: Retrying with query '{alt_query}'")
                 resp = await s.post(url, headers=headers, json=payload)
+                if resp.status_code == 200:
+                    hits = resp.json().get('hits', [])
+            
+            if not hits:
+                return self.not_found
+            
+            # Filter for exact MPN match if possible
+            target_mpn = mpn.lower().replace("-", "").replace("/", "").strip()
+            
+            best_hit = None
+            for hit in hits:
+                hit_mpn = str(hit.get('products_model', '')).lower().replace("-", "").replace("/", "").strip()
+                # Also check barcode if model doesn't match
+                hit_barcode = str(hit.get('barcode', ''))
                 
-                if resp.status_code != 200:
-                    logger.warning(f"PCCG API error: {resp.status_code}")
-                    return self.not_found
-                
-                data = resp.json()
-                hits = data.get('hits', [])
-                
-                if not hits:
-                    return self.not_found
-                
-                # Filter for exact MPN match if possible
-                target_mpn = mpn.lower().replace("-", "").strip()
-                
-                best_hit = None
-                for hit in hits:
-                    hit_mpn = str(hit.get('products_model', '')).lower().replace("-", "").strip()
-                    # Also check barcode if model doesn't match
-                    hit_barcode = str(hit.get('barcode', ''))
-                    
-                    if target_mpn == hit_mpn or target_mpn == hit_barcode:
-                        best_hit = hit
-                        break
-                    # Partial match as fallback
-                    if target_mpn in hit_mpn:
-                        if not best_hit: best_hit = hit
-                
-                if not best_hit:
-                    # Fallback to first hit if query was specific
-                    best_hit = hits[0]
+                # Check for match (allowing for missing separators)
+                if target_mpn == hit_mpn or target_mpn == hit_barcode:
+                    best_hit = hit
+                    break
+                # Partial match as fallback
+                if target_mpn in hit_mpn or hit_mpn in target_mpn:
+                    if not best_hit: best_hit = hit
+            
+            if not best_hit:
+                # Fallback to first hit if query was specific
+                best_hit = hits[0]
 
-                # Extract Price
-                price_val = best_hit.get('products_price')
-                if not price_val:
-                    return self.not_found
-                price = float(price_val)
+            # Extract Price
+            price_val = best_hit.get('products_price')
+            if not price_val:
+                return self.not_found
+            price = float(price_val)
 
-                # Extract URL
-                url_suffix = best_hit.get('Product_URL', '')
-                if url_suffix:
-                    product_url = f"https://www.pccasegear.com{url_suffix}"
-                else:
-                    # Construct URL if missing
-                    pid = best_hit.get('products_id')
-                    product_url = f"https://www.pccasegear.com/products/{pid}"
+            # Extract URL
+            url_suffix = best_hit.get('Product_URL', '')
+            if url_suffix:
+                product_url = f"https://www.pccasegear.com{url_suffix}"
+            else:
+                # Construct URL if missing
+                pid = best_hit.get('products_id')
+                product_url = f"https://www.pccasegear.com/products/{pid}"
 
-                # Extract Stock
-                indicator = best_hit.get('indicator', {})
-                stock_label = indicator.get('label', 'Unknown') if indicator else 'Unknown'
-                in_stock = False
-                
-                if "in stock" in stock_label.lower():
-                    in_stock = True
-                elif "pre-order" in stock_label.lower():
-                    in_stock = True # Technically purchasable
-                elif best_hit.get('is_ETA_TBA') == '0' and stock_label != 'Sold out':
-                     # Some items might not have indicator but not TBA
-                     pass
+            # Extract Stock
+            indicator = best_hit.get('indicator', {})
+            stock_label = indicator.get('label', 'Unknown') if indicator else 'Unknown'
+            in_stock = False
+            
+            if "in stock" in stock_label.lower():
+                in_stock = True
+            elif "pre-order" in stock_label.lower():
+                in_stock = True # Technically purchasable
+            elif best_hit.get('is_ETA_TBA') == '0' and stock_label != 'Sold out':
+                    # Some items might not have indicator but not TBA
+                    pass
 
-                # Condition (Default New)
-                condition = "New"
-                final_condition = f"{condition} ({stock_label})" if in_stock else condition
+            # Condition (Default New)
+            condition = "New"
+            final_condition = f"{condition} ({stock_label})" if in_stock else condition
 
-                return PriceResult(
-                    vendor_id=self.vendor_id,
-                    url=product_url,
-                    mpn=best_hit.get('products_model'),
-                    price=price,
-                    currency=self.currency,
-                    in_stock=in_stock,
-                    condition=final_condition,
-                    found=True
-                )
+            return PriceResult(
+                vendor_id=self.vendor_id,
+                url=product_url,
+                mpn=best_hit.get('products_model'),
+                price=price,
+                currency=self.currency,
+                in_stock=in_stock,
+                condition=final_condition,
+                found=True
+            )
 
         except Exception as e:
             logger.error(f"PCCG API exception: {e}")
             return self.not_found
+        finally:
+            if not session:
+                await s.close()

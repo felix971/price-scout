@@ -45,20 +45,9 @@ class WiredZoneScraper(BaseScraper):
         found=False
     )
 
-    async def scrape(self, mpn: str) -> PriceResult:
+    async def scrape(self, mpn: str, session: AsyncSession = None) -> PriceResult:
         """
         Scrape price data for a given MPN from Wired Zone.
-
-        Strategy:
-        1. Search Wired Zone for MPN
-        2. Find matching product in results
-        3. Visit product page for detailed stock info
-
-        Args:
-            mpn: Manufacturer Part Number to search for.
-
-        Returns:
-            PriceResult with product data if found, otherwise not_found.
         """
         search_url = f"https://www.wiredzone.com/shop?search={mpn}"
 
@@ -70,48 +59,54 @@ class WiredZoneScraper(BaseScraper):
 
         logger.info(f"Wired Zone: Searching for MPN={mpn}")
 
+        # Use passed session or create a temporary one
+        s = session if session else AsyncSession()
+        
         try:
-            async with AsyncSession() as s:
-                resp = await s.get(
-                    search_url,
-                    headers=headers,
-                    impersonate="chrome124",
-                    timeout=30
-                )
+            resp = await s.get(
+                search_url,
+                headers=headers,
+                impersonate="chrome124" if not session else None, # Already set on shared session
+                timeout=30
+            )
 
-                if resp.status_code not in [200, 404]:
-                    logger.warning(f"Wired Zone: Status {resp.status_code} for MPN={mpn}")
-                    return self.not_found
-
-                soup = BeautifulSoup(resp.text, "lxml")
-
-                # Find product cards, excluding "No Product Found" cards
-                product_cards = [
-                    c for c in soup.select(".oe_product")
-                    if "te_no_products" not in (c.get("class") or [])
-                ]
-
-                if not product_cards:
-                    logger.info(f"Wired Zone: No products found for MPN={mpn}")
-                    return self.not_found
-
-                # Look for MPN match in product names
-                for card in product_cards:
-                    name_elem = card.select_one("a.product_name")
-                    if not name_elem:
-                        continue
-
-                    product_name = name_elem.get("content", "") or name_elem.get_text(strip=True)
-
-                    if mpn.upper() in product_name.upper():
-                        return await self._extract_product(s, headers, card, mpn)
-
-                logger.info(f"Wired Zone: No exact match found for MPN={mpn}")
+            if resp.status_code not in [200, 404]:
+                logger.warning(f"Wired Zone: Status {resp.status_code} for MPN={mpn}")
                 return self.not_found
+
+            soup = BeautifulSoup(resp.text, "lxml")
+
+            # Find product cards, excluding "No Product Found" cards
+            product_cards = [
+                c for c in soup.select(".oe_product")
+                if "te_no_products" not in (c.get("class") or [])
+            ]
+
+            if not product_cards:
+                logger.info(f"Wired Zone: No products found for MPN={mpn}")
+                return self.not_found
+
+            # Look for MPN match in product names
+            for card in product_cards:
+                name_elem = card.select_one("a.product_name")
+                if not name_elem:
+                    continue
+
+                product_name = name_elem.get("content", "") or name_elem.get_text(strip=True)
+
+                if mpn.upper() in product_name.upper():
+                    return await self._extract_product(s, headers, card, mpn)
+
+            logger.info(f"Wired Zone: No exact match found for MPN={mpn}")
+            return self.not_found
 
         except Exception as e:
             logger.error(f"Wired Zone: Error for MPN={mpn}: {e}")
             return self.not_found
+        finally:
+            # Only close if we created it locally
+            if not session:
+                await s.close()
 
     async def _extract_product(
         self, session: AsyncSession, headers: dict, card, mpn: str

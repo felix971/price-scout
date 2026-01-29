@@ -44,20 +44,9 @@ class ServerSupplyScraper(BaseScraper):
         found=False
     )
 
-    async def scrape(self, mpn: str) -> PriceResult:
+    async def scrape(self, mpn: str, session: AsyncSession = None) -> PriceResult:
         """
         Scrape price data for a given MPN from Server Supply.
-
-        Strategy:
-        1. Search for MPN on Server Supply
-        2. Find matching product link
-        3. Visit product page for price, stock, and condition
-
-        Args:
-            mpn: Manufacturer Part Number to search for.
-
-        Returns:
-            PriceResult with product data if found, otherwise not_found.
         """
         search_url = f"https://www.serversupply.com/products/part_search/query_parts.asp?q={mpn}"
 
@@ -69,65 +58,60 @@ class ServerSupplyScraper(BaseScraper):
 
         logger.info(f"Server Supply: Searching for MPN={mpn}")
 
+        s = session if session else AsyncSession()
+
         try:
-            async with AsyncSession() as s:
-                resp = await s.get(
-                    search_url,
-                    headers=headers,
-                    impersonate="chrome124",
-                    timeout=30
-                )
+            resp = await s.get(
+                search_url,
+                headers=headers,
+                impersonate="chrome124" if not session else None,
+                timeout=30
+            )
 
-                if resp.status_code not in [200, 404]:
-                    logger.warning(f"Server Supply: Status {resp.status_code} for MPN={mpn}")
-                    return self.not_found
-
-                soup = BeautifulSoup(resp.text, "lxml")
-
-                # Check page title for search term
-                title = soup.title.string if soup.title else ""
-                if not title or "Not Found" in title:
-                    logger.info(f"Server Supply: No results for MPN={mpn}")
-                    return self.not_found
-
-                # Look for product links with .htm extension
-                product_links = soup.select('a[href*=".htm"]')
-
-                for link in product_links:
-                    href = link.get("href", "")
-                    text = link.get_text(strip=True)
-
-                    if f"Part No. {mpn}" in text or mpn.upper() in text.upper() or mpn.upper() in href.upper():
-                        product_url = href if href.startswith("http") else "https://www.serversupply.com" + href
-                        return await self._scrape_product_page(s, headers, product_url, mpn)
-
-                logger.info(f"Server Supply: No exact match found for MPN={mpn}")
+            if resp.status_code not in [200, 404]:
+                logger.warning(f"Server Supply: Status {resp.status_code} for MPN={mpn}")
                 return self.not_found
+
+            soup = BeautifulSoup(resp.text, "lxml")
+
+            # Check page title for search term
+            title = soup.title.string if soup.title else ""
+            if not title or "Not Found" in title:
+                logger.info(f"Server Supply: No results for MPN={mpn}")
+                return self.not_found
+
+            # Look for product links with .htm extension
+            product_links = soup.select('a[href*=".htm"]')
+
+            for link in product_links:
+                href = link.get("href", "")
+                text = link.get_text(strip=True)
+
+                if f"Part No. {mpn}" in text or mpn.upper() in text.upper() or mpn.upper() in href.upper():
+                    product_url = href if href.startswith("http") else "https://www.serversupply.com" + href
+                    return await self._scrape_product_page(s, headers, product_url, mpn, using_shared=bool(session))
+
+            logger.info(f"Server Supply: No exact match found for MPN={mpn}")
+            return self.not_found
 
         except Exception as e:
             logger.error(f"Server Supply: Error for MPN={mpn}: {e}")
             return self.not_found
+        finally:
+            if not session:
+                await s.close()
 
     async def _scrape_product_page(
-        self, session: AsyncSession, headers: dict, product_url: str, mpn: str
+        self, session: AsyncSession, headers: dict, product_url: str, mpn: str, using_shared: bool = False
     ) -> PriceResult:
         """
         Visit product page to extract price, stock, and condition.
-
-        Args:
-            session: AsyncSession instance
-            headers: Request headers
-            product_url: URL of the product page
-            mpn: Manufacturer Part Number
-
-        Returns:
-            PriceResult with product data or not_found
         """
         try:
             resp = await session.get(
                 product_url,
                 headers=headers,
-                impersonate="chrome124",
+                impersonate="chrome124" if not using_shared else None,
                 timeout=30
             )
 
