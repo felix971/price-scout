@@ -37,8 +37,11 @@ class EbayScraper(BaseScraper):
         """
         Scrape price data using Playwright browser automation.
         """
-        # Search URL for eBay Australia
-        search_url = f"https://www.ebay.com.au/sch/i.html?_nkw={mpn}&LH_BIN=1&_sop=15"
+        # Search URL for eBay Australia but WORLDWIDE scope
+        # LH_BIN=1: Buy It Now only
+        # _sop=15: Sort by Price + Shipping: lowest first
+        # LH_PrefLoc=2: Worldwide
+        search_url = f"https://www.ebay.com.au/sch/i.html?_nkw={mpn}&LH_BIN=1&_sop=15&LH_PrefLoc=2"
         
         page = None
         context = None
@@ -183,6 +186,17 @@ class EbayScraper(BaseScraper):
             text = about_section.get_text()
             mpn_match = re.search(r'MPN[:\s]+([A-Za-z0-9\-_\.]+)', text, re.IGNORECASE)
             if mpn_match and self._mpn_matches(target, mpn_match.group(1)): return True
+
+        # FINAL FALLBACK: Check Title
+        title_elem = soup.select_one("h1.x-item-title__mainTitle") or soup.select_one("h1")
+        if title_elem:
+            title_text = title_elem.get_text(strip=True)
+            clean_title = self._normalize_mpn(title_text)
+            # Ensure the MPN is actually a significant part of the title
+            # Avoid matching "100" in "100 Pack" if target is "100"
+            if target in clean_title:
+                logger.info(f"eBay AU (Playwright): Matched MPN in title: {title_text}")
+                return True
 
         return False
 
