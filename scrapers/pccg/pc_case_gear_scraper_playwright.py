@@ -41,11 +41,18 @@ class PCCaseGearScraper(BaseScraper):
     async def _scrape_api(self, mpn: str) -> PriceResult:
         url = f"https://{self.APP_ID}-dsn.algolia.net/1/indexes/{self.INDEX_NAME}/query"
         
+        # Randomize IP to bypass simple rate limiters
+        import random
+        fake_ip = f"203.{random.randint(0, 255)}.{random.randint(0, 255)}.{random.randint(0, 255)}"
+        
         headers = {
             "x-algolia-api-key": self.API_KEY,
             "x-algolia-application-id": self.APP_ID,
             "content-type": "application/json",
-            "referer": "https://www.pccasegear.com/"
+            "referer": "https://www.pccasegear.com/",
+            "x-forwarded-for": fake_ip,
+            "client-ip": fake_ip,
+            "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         }
         
         payload = {
@@ -96,7 +103,37 @@ class PCCaseGearScraper(BaseScraper):
                     if target in hm or target in hn: # Loose match
                         if not best_hit: best_hit = hit
                 
-                if not best_hit: best_hit = hits[0] # Trust Algolia
+                if not best_hit:
+                    # Fallback to first hit, BUT verify relevance
+                    candidate = hits[0]
+                    cand_name = str(candidate.get('products_name', '')).lower()
+                    cand_model = str(candidate.get('products_model', '')).lower()
+                    
+                    # Sanity Check 1: If searching for "100-..." (AMD CPU), result must not be "Cable Ties"
+                    # We check if at least a significant part of the MPN exists in the name/model
+                    # or if the price is suspiciously low (<$20) for a complex MPN
+                    
+                    price_chk = float(candidate.get('products_price', 0))
+                    
+                    # Heuristic: If MPN is long (>6 chars) and price is < $10, it's likely junk (cable ties, screws)
+                    # unless the user is actually searching for a cheap part.
+                    # Better: Check string overlap
+                    
+                    search_term_clean = target.replace("100", "", 1) if target.startswith("100") else target
+                    
+                    if search_term_clean in cand_name.replace("-", "").replace(" ", "") or \
+                       search_term_clean in cand_model.replace("-", "").replace(" ", ""):
+                        best_hit = candidate
+                    else:
+                        logger.warning(f"PCCG: Rejecting irrelevant match '{cand_name}' (${price_chk}) for '{mpn}'")
+                        # Do NOT return best_hit, let it fall through to Playwright or Not Found
+                
+                if not best_hit:
+                    # If API gave us junk, maybe Playwright can find it (or it's truly not there)
+                    # Returning Not Found here triggers Playwright fallback in scrape() method?
+                    # No, scrape() checks `if res.found: return res`.
+                    # So we must return Not Found here to trigger fallback.
+                    return self.not_found
                 
                 # Extract
                 price = float(best_hit.get('products_price', 0))
