@@ -32,6 +32,12 @@ Vendors Supported:
 
 import time
 import asyncio
+import sys
+
+# Fix for Windows asyncio loop
+if sys.platform == 'win32':
+    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+
 import pandas as pd
 from io import StringIO
 from datetime import datetime
@@ -209,35 +215,40 @@ with tab_single:
 
         async def _stream():
             from models.models import PriceResult
-            async for res_item in scraper_system.start():
-                progress_state["count"] += 1
-                result = res_item.get("result")
-                vendor = res_item.get("vendor", "")
-                if result is None:
-                    result = PriceResult(
-                        vendor_id=vendor.lower().replace(" ", "_"),
-                        found=False,
+            from utils.playwright_manager import PlaywrightManager
+
+            try:
+                async for res_item in scraper_system.start():
+                    progress_state["count"] += 1
+                    result = res_item.get("result")
+                    vendor = res_item.get("vendor", "")
+                    if result is None:
+                        result = PriceResult(
+                            vendor_id=vendor.lower().replace(" ", "_"),
+                            found=False,
+                        )
+                    all_results.append(result)
+
+                    # Update live status
+                    found_count = sum(1 for r in all_results if r.found)
+                    status_placeholder.markdown(
+                        f"**{progress_state['count']}/{total_vendors}** vendors done "
+                        f"— **{found_count}** found"
                     )
-                all_results.append(result)
 
-                # Update live status
-                found_count = sum(1 for r in all_results if r.found)
-                status_placeholder.markdown(
-                    f"**{progress_state['count']}/{total_vendors}** vendors done "
-                    f"— **{found_count}** found"
-                )
-
-                # Rebuild and display table
-                df = _build_df(all_results, detailed)
-                table_placeholder.dataframe(
-                    df,
-                    column_config={
-                        "Price": st.column_config.NumberColumn(format="$%.2f"),
-                        "URL": st.column_config.LinkColumn(label="Link", display_text="Link"),
-                    },
-                    width="stretch",
-                    hide_index=True,
-                )
+                    # Rebuild and display table
+                    df = _build_df(all_results, detailed)
+                    table_placeholder.dataframe(
+                        df,
+                        column_config={
+                            "Price": st.column_config.NumberColumn(format="$%.2f"),
+                            "URL": st.column_config.LinkColumn(label="Link", display_text="Link"),
+                        },
+                        width="stretch",
+                        hide_index=True,
+                    )
+            finally:
+                await PlaywrightManager.shutdown()
 
         asyncio.run(_stream())
 
@@ -320,44 +331,48 @@ with tab_batch:
                 progress_state = {'received': 0}
                 
                 async def run_batch():
-                    async for res_item in scraper_system.start():
-                        progress_state['received'] += 1
-                        results_received = progress_state['received']
-                        mpn = res_item['mpn']
-                        vendor = res_item['vendor']
-                        result = res_item['result']
-                        
-                        # Update progress
-                        progress = results_received / total_expected_results
-                        progress_bar.progress(min(progress, 1.0))
-                        status_text.text(f"Processing... {results_received}/{total_expected_results} checks completed.")
-                        
-                        # Save result
-                        if mpn not in all_results_dict:
-                            all_results_dict[mpn] = {}
-                        all_results_dict[mpn][vendor] = result
-
-                        if result:
-                            # Process and save to DB immediately
-                            vendor_display_name = vendor_names.get(result.vendor_id, result.vendor_id)
-                            process_and_save_result(
-                                mpn=mpn.strip(),
-                                vendor_name=vendor_display_name,
-                                found=result.found,
-                                price=float(result.price) if result.price else None
-                            )
+                    from utils.playwright_manager import PlaywrightManager
+                    try:
+                        async for res_item in scraper_system.start():
+                            progress_state['received'] += 1
+                            results_received = progress_state['received']
+                            mpn = res_item['mpn']
+                            vendor = res_item['vendor']
+                            result = res_item['result']
                             
-                            # Add to detailed rows
-                            price_value = float(result.price) if result.price else None
-                            vendor_rows.append({
-                                'MPN': mpn,
-                                'Vendor': vendor_display_name,
-                                'Price': price_value,
-                                'Found': "✅" if result.found else "❌",
-                                'In Stock': "✅" if result.in_stock else ("❌" if result.in_stock is False else "N/A"),
-                                'Condition': result.condition if result.condition else None,
-                                'URL': str(result.url) if result.url else None
-                            })
+                            # Update progress
+                            progress = results_received / total_expected_results
+                            progress_bar.progress(min(progress, 1.0))
+                            status_text.text(f"Processing... {results_received}/{total_expected_results} checks completed.")
+                            
+                            # Save result
+                            if mpn not in all_results_dict:
+                                all_results_dict[mpn] = {}
+                            all_results_dict[mpn][vendor] = result
+
+                            if result:
+                                # Process and save to DB immediately
+                                vendor_display_name = vendor_names.get(result.vendor_id, result.vendor_id)
+                                process_and_save_result(
+                                    mpn=mpn.strip(),
+                                    vendor_name=vendor_display_name,
+                                    found=result.found,
+                                    price=float(result.price) if result.price else None
+                                )
+                                
+                                # Add to detailed rows
+                                price_value = float(result.price) if result.price else None
+                                vendor_rows.append({
+                                    'MPN': mpn,
+                                    'Vendor': vendor_display_name,
+                                    'Price': price_value,
+                                    'Found': "✅" if result.found else "❌",
+                                    'In Stock': "✅" if result.in_stock else ("❌" if result.in_stock is False else "N/A"),
+                                    'Condition': result.condition if result.condition else None,
+                                    'URL': str(result.url) if result.url else None
+                                })
+                    finally:
+                        await PlaywrightManager.shutdown()
 
                 asyncio.run(run_batch())
                 
