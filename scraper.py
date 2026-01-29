@@ -4,19 +4,13 @@ Price Scout Core Scraping Module.
 This module provides core scraping functionality for querying product prices
 from multiple vendors concurrently. Supports both single and batch operations
 with CSV import/export capabilities.
-
-Functions:
-    - scrape_mpn_single: Query single MPN across all vendors
-    - read_mpns_from_csv: Load MPNs from CSV file
-    - batch_scrape_mpns: Process multiple MPNs with concurrency control
-    - write_results_to_csv: Export results to CSV format
 """
 
 import csv
 import time
 import logging
 import asyncio
-from typing import List
+from typing import List, Tuple, Optional, Any, Dict
 
 from scrapers.scorptec.scorptec_scraper import ScorptecScraper
 from scrapers.mwave.mwave_scraper import MwaveScraper
@@ -53,11 +47,7 @@ logging.basicConfig(
 
 logger = logging.getLogger("price-scout")
 
-
-SCRAPER_TIMEOUT = 30  # seconds per vendor
-
-
-def _get_scrapers(detailed=False):
+def get_scraper_instances(detailed=False):
     """Return list of (vendor_name, scraper_instance) tuples."""
     if not detailed:
         return [
@@ -97,290 +87,122 @@ def _get_scrapers(detailed=False):
         ("Amazon AU", AmazonPlaywrightScraper()),
     ]
 
-
-async def scrape_mpn_streaming(mpn, detailed=False):
-    """
-    Async generator that yields (vendor_name, PriceResult|None) as each
-    vendor completes, fastest first.
-
-    Uses an asyncio.Queue so each vendor worker pushes its result
-    independently — the caller receives results in completion order.
-    """
-    mpn = mpn.strip()
-    scrapers = _get_scrapers(detailed)
-    result_queue = asyncio.Queue()
-
-    async def _worker(vendor_name, scraper_inst):
-        try:
-            result = await asyncio.wait_for(
-                scraper_inst.scrape(mpn), timeout=SCRAPER_TIMEOUT
-            )
-        except asyncio.TimeoutError:
-            logger.warning("%s scraper timed out after %ds", vendor_name, SCRAPER_TIMEOUT)
-            result = None
-        except Exception as e:
-            logger.error("%s scraper failed: %s", vendor_name, e)
-            result = None
-        await result_queue.put((vendor_name, result))
-
-    # Launch all workers concurrently
-    tasks = [asyncio.create_task(_worker(v, s)) for v, s in scrapers]
-
-    # Yield results in completion order
-    for _ in range(len(scrapers)):
-        vendor_name, result = await result_queue.get()
-        if result:
-            logger.info("%s result: %s", vendor_name, result)
-        else:
-            logger.warning("No %s result found (or timed out)", vendor_name)
-        yield vendor_name, result
-
-    # Safety: ensure all tasks are done
-    await asyncio.gather(*tasks, return_exceptions=True)
-
-
 async def scrape_mpn_single(mpn, detailed=False):
     """
-    Scrape price data for a single MPN from all supported vendors concurrently.
-
-    Collects all results from scrape_mpn_streaming and returns them as a list.
+    Legacy function for single MPN scrape compatibility.
+    Runs a batch of 1 MPN using the new AsyncBatchScraper logic.
     """
-    start = time.perf_counter()
-    logger.info("Starting price scout for MPN=%s", mpn)
-
+    scraper_system = AsyncBatchScraper([mpn], detailed=detailed)
     results = []
-    async for _vendor, result in scrape_mpn_streaming(mpn, detailed):
-        if result is not None:
-            results.append(result)
-
-    elapsed = time.perf_counter() - start
-    logger.info("All scrapers completed in %.2f seconds", elapsed)
+    async for result_item in scraper_system.start():
+        if result_item.get('mpn') == mpn and result_item.get('result'):
+            results.append(result_item['result'])
     return results
 
+class AsyncBatchScraper:
+    """
+    Manages high-performance batch scraping using a Producer-Consumer model.
+    Each vendor has its own worker(s) consuming from a shared queue, allowing
+    fast vendors to process MPNs without waiting for slow vendors.
+    
+    IMPROVED: Now supports intra-vendor concurrency (multiple MPNs per vendor).
+    """
+    def __init__(self, mpns: List[str], detailed: bool = False, concurrency: int = 3):
+        self.mpns = mpns
+        self.detailed = detailed
+        self.concurrency = concurrency
+        self.scrapers = get_scraper_instances(detailed)
+        self.results_queue = asyncio.Queue()
+        self.total_tasks = len(mpns) * len(self.scrapers)
+
+    async def start(self):
+        """
+        Initialize queues, start workers, distribute tasks, and yield results as they come.
+        """
+        vendor_queues = {}
+        worker_tasks = []
+        
+        for vendor_name, scraper_inst in self.scrapers:
+            vq = asyncio.Queue()
+            vendor_queues[vendor_name] = vq
+            # Start a worker for this specific vendor/queue
+            t = asyncio.create_task(self._vendor_specific_worker(vendor_name, scraper_inst, vq))
+            worker_tasks.append(t)
+            
+            # Fill this vendor's queue with all MPNs
+            for mpn in self.mpns:
+                vq.put_nowait(mpn)
+        
+        # Monitor total tasks completion
+        expected_results = len(self.mpns) * len(self.scrapers)
+        processed_count = 0
+        
+        while processed_count < expected_results:
+            # Wait for the next result from any worker
+            res = await self.results_queue.get()
+            processed_count += 1
+            yield res
+            
+        # Cleanup
+        for t in worker_tasks:
+            t.cancel()
+            
+    async def _vendor_specific_worker(self, vendor_name, scraper_inst, queue):
+        """
+        Consumes MPNs from the queue and launches concurrent scrape tasks.
+        Uses a Semaphore to limit concurrency per vendor.
+        """
+        semaphore = asyncio.Semaphore(self.concurrency)
+        pending_tasks = set()
+
+        async def _bounded_scrape(task_mpn):
+            async with semaphore:
+                try:
+                    # Randomize delay slightly to appear more human-like? 
+                    # await asyncio.sleep(random.uniform(0.1, 0.5))
+                    
+                    # Scrape with timeout
+                    result = await asyncio.wait_for(scraper_inst.scrape(task_mpn), timeout=60.0)
+                except Exception as e:
+                    # logger.warning(f"{vendor_name} error for {task_mpn}: {e}") 
+                    result = None 
+                
+                await self.results_queue.put({
+                    'mpn': task_mpn,
+                    'vendor': vendor_name,
+                    'result': result
+                })
+                queue.task_done()
+
+        while True:
+            # Get next MPN from queue
+            mpn = await queue.get()
+            
+            # Launch a background task for this scrape (guarded by semaphore inside)
+            # IMPORTANT: We do not await here, so we can pick up the next MPN immediately
+            # and let the semaphore handle the blocking/throttling.
+            task = asyncio.create_task(_bounded_scrape(mpn))
+            pending_tasks.add(task)
+            task.add_done_callback(pending_tasks.discard)
 
 def read_mpns_from_csv(csv_path: str) -> List[str]:
-    """
-    Read Manufacturer Part Numbers from a CSV file.
-
-    Supports CSV files with either 'mpn' or 'name' column headers.
-    Automatically strips whitespace and filters out empty values.
-
-    Args:
-        csv_path: Path to the CSV file containing MPNs.
-
-    Returns:
-        List of MPN strings extracted from the CSV file.
-
-    Raises:
-        ValueError: If CSV doesn't contain 'mpn' or 'name' column.
-        FileNotFoundError: If the CSV file doesn't exist.
-
-    Example:
-        >>> mpns = read_mpns_from_csv('products.csv')
-        >>> print(f"Found {len(mpns)} products to process")
-    """
+    """Read Manufacturer Part Numbers from a CSV file."""
     mpns = []
     with open(csv_path, 'r', encoding='utf-8') as f:
         reader = csv.DictReader(f)
-
-        mpn_column = None
-        if 'mpn' in reader.fieldnames:
-            mpn_column = 'mpn'
-        elif 'MPN' in reader.fieldnames:
-            mpn_column = 'MPN'
-        else:
+        mpn_column = next((c for c in ['mpn', 'MPN'] if c in reader.fieldnames), None)
+        if not mpn_column:
             raise ValueError("CSV file must contain 'mpn' or 'MPN' column")
-
         for row in reader:
             if row.get(mpn_column, '').strip():
                 mpns.append(row[mpn_column].strip())
     return mpns
 
-
-async def scrape_single_mpn_async(mpn: str, scrapers):
-    """
-    Scrape a single MPN from all scrapers asynchronously (internal helper).
-
-    This is an internal function used by batch_scrape_mpns to process
-    individual MPNs within the batch operation.
-
-    Args:
-        mpn: Manufacturer Part Number to scrape.
-        scrapers: List of (vendor_name, scraper_instance) tuples.
-
-    Returns:
-        Tuple of (mpn, result_dict) where result_dict maps vendor names to
-        PriceResult objects or None for failed scrapers.
-    """
-    tasks = [scraper.scrape(mpn) for _, scraper in scrapers]
-    results = await asyncio.gather(*tasks, return_exceptions=True)
-
-    result_dict = {}
-    for (vendor, _), result in zip(scrapers, results):
-        if isinstance(result, Exception):
-            logger.error("%s scraper failed for %s: %s", vendor, mpn, result)
-            result_dict[vendor] = None
-        elif result:
-            logger.info("%s result for %s: %s", vendor, mpn, result)
-            result_dict[vendor] = result
-        else:
-            logger.warning("No %s result found for %s", vendor, mpn)
-            result_dict[vendor] = None
-
-    return mpn, result_dict
-
-
-async def batch_scrape_mpns(mpns: List[str], scrapers):
-    """
-    Batch scrape multiple MPNs concurrently with rate limiting.
-
-    Processes multiple MPNs in parallel with a semaphore to limit concurrent
-    operations and prevent overwhelming vendor servers or triggering rate limits.
-
-    Concurrency: Limited to 5 MPNs at a time (5 MPNs × 5 vendors = ~25 concurrent requests)
-
-    Args:
-        mpns: List of Manufacturer Part Numbers to scrape.
-        scrapers: List of (vendor_name, scraper_instance) tuples.
-
-    Returns:
-        List of tuples: [(mpn, {vendor: PriceResult, ...}), ...]
-        Each tuple contains an MPN and a dictionary mapping vendor names to results.
-
-    Example:
-        >>> scrapers = [("Scorptec", ScorptecScraper()), ...]
-        >>> results = await batch_scrape_mpns(['MPN1', 'MPN2'], scrapers)
-        >>> for mpn, vendor_results in results:
-        ...     print(f"{mpn}: {len(vendor_results)} vendors checked")
-    """
-    # Limit concurrency to 16 MPNs at a time (matches vendor count)
-    # (Since each MPN triggers 16 internal requests, this equals ~256 total concurrent connections)
-    semaphore = asyncio.Semaphore(16)
-
-    async def bounded_scrape(index, mpn):
-        """Helper to wrap scraping with semaphore control."""
-        async with semaphore:
-            logger.info("Processing %d/%d: %s", index, len(mpns), mpn)
-            return await scrape_single_mpn_async(mpn, scrapers)
-
-    tasks = [bounded_scrape(i, mpn) for i, mpn in enumerate(mpns, 1)]
-
-    # Run all tasks concurrently
-    all_results = await asyncio.gather(*tasks, return_exceptions=True)
-
-    # Filter out any top-level exceptions in the batch process itself
-    valid_results = []
-    for res in all_results:
-        if isinstance(res, Exception):
-            logger.error("Batch task failed: %s", res)
-        else:
-            valid_results.append(res)
-
-    return valid_results
-
-
-def write_results_to_csv(results, output_path: str):
-    """
-    Write batch scraping results to a CSV file.
-
-    Exports comprehensive results including individual vendor prices, URLs,
-    and automatically identifies the lowest price across all vendors.
-
-    CSV Columns:
-        - mpn: Manufacturer Part Number
-        - lowest_price: Best price found across all vendors
-        - lowest_price_vendor: Vendor offering the lowest price
-        - lowest_price_url: Product URL at the cheapest vendor
-        - {vendor}_price: Price at each specific vendor
-        - {vendor}_url: Product URL at each specific vendor
-
-    Args:
-        results: List of (mpn, result_dict) tuples from batch_scrape_mpns.
-        output_path: Destination file path for the CSV output.
-
-    Returns:
-        None: Writes results directly to file.
-
-    Example:
-        >>> results = await batch_scrape_mpns(mpns, scrapers)
-        >>> write_results_to_csv(results, 'output.csv')
-        INFO: Results written to output.csv
-    """
-    if not results:
-        logger.warning("No results to write")
-        return
-
-    fieldnames = [
-        'mpn', 'lowest_price', 'lowest_price_vendor', 'lowest_price_url',
-        'scorptec_price', 'scorptec_url', 'mwave_price', 'mwave_url',
-        'pccasegear_price', 'pccasegear_url', 'jwcomputers_price', 'jwcomputers_url',
-        'umart_price', 'umart_url', 'digicor_price', 'digicor_url',
-        'centrecom_price', 'centrecom_url', 'computeralliance_price', 'computeralliance_url',
-        'cpl_price', 'cpl_url', 'devicedeal_price', 'devicedeal_url',
-        'pbtech_price', 'pbtech_url',
-        'wiredzone_price', 'wiredzone_url',
-        'ple_price', 'ple_url',
-        'serversupply_price', 'serversupply_url',
-        'ebay_au_price', 'ebay_au_url',
-        'amazon_au_price', 'amazon_au_url'
-    ]
-
-    with open(output_path, 'w', newline='', encoding='utf-8') as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        writer.writeheader()
-
-        for mpn, result_dict in results:
-            row = {'mpn': mpn}
-
-            # Find lowest price
-            lowest_price = None
-            lowest_vendor = None
-            lowest_url = None
-
-            vendor_map = {
-                'Scorptec': 'scorptec',
-                'Mwave': 'mwave',
-                'PC Case Gear': 'pccasegear',
-                'JW Computers': 'jwcomputers',
-                'Umart': 'umart',
-                'Digicor': 'digicor',
-                'Centrecom': 'centrecom',
-                'Computer Alliance': 'computeralliance',
-                'CPL': 'cpl',
-                'Device Deal': 'devicedeal',
-                'PB Tech': 'pbtech',
-                'Wired Zone': 'wiredzone',
-                'PLE': 'ple',
-                'Server Supply': 'serversupply',
-                'eBay AU': 'ebay_au',
-                'Amazon AU': 'amazon_au'
-            }
-
-            for vendor_name, data in result_dict.items():
-                vendor_key = vendor_map.get(vendor_name, vendor_name.lower())
-                if data and data.price is not None:
-                    if lowest_price is None or data.price < lowest_price:
-                        lowest_price = data.price
-                        lowest_vendor = vendor_key
-                        lowest_url = str(data.url)
-                    row[f'{vendor_key}_price'] = float(data.price)
-                    row[f'{vendor_key}_url'] = str(data.url)
-                else:
-                    row[f'{vendor_key}_price'] = None
-                    row[f'{vendor_key}_url'] = None
-
-            row['lowest_price'] = float(lowest_price) if lowest_price else None
-            row['lowest_price_vendor'] = lowest_vendor
-            row['lowest_price_url'] = lowest_url
-
-            writer.writerow(row)
-
-    logger.info("Results written to %s", output_path)
-
-
 if __name__ == "__main__":
-    results = asyncio.run(scrape_mpn_single())
+    async def test():
+        # Simple test
+        batch = AsyncBatchScraper(["BX8071512400"])
+        async for res in batch.start():
+            print(f"[{res['vendor']}] Finished: {res['result'] is not None}")
 
-    for r in results:
-        print(r)
-        print()
+    asyncio.run(test())

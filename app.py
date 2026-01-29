@@ -35,7 +35,7 @@ import asyncio
 import pandas as pd
 from io import StringIO
 from datetime import datetime
-from scraper import scrape_mpn_single, scrape_mpn_streaming
+from scraper import scrape_mpn_single, AsyncBatchScraper
 from db.db_manager import DatabaseManager
 import streamlit as st
 import plotly.graph_objects as go
@@ -184,7 +184,7 @@ with tab_single:
         detailed = (scrape_mode == "More Info")
         status_placeholder = st.empty()
         table_placeholder = st.empty()
-        all_results = []
+        all_results = []  # list of PriceResult
 
         def _build_df(results_so_far, is_detailed):
             if is_detailed:
@@ -203,14 +203,19 @@ with tab_single:
                 "URL": str(r.url) if r.url else None,
             } for r in results_so_far])
 
+        scraper_system = AsyncBatchScraper([mpn_input.strip()], detailed=detailed)
+        total_vendors = len(scraper_system.scrapers)
+        progress_state = {"count": 0}
+
         async def _stream():
             from models.models import PriceResult
-            count = 0
-            async for vendor_name, result in scrape_mpn_streaming(mpn_input.strip(), detailed):
-                count += 1
+            async for res_item in scraper_system.start():
+                progress_state["count"] += 1
+                result = res_item.get("result")
+                vendor = res_item.get("vendor", "")
                 if result is None:
                     result = PriceResult(
-                        vendor_id=vendor_name.lower().replace(" ", "_"),
+                        vendor_id=vendor.lower().replace(" ", "_"),
                         found=False,
                     )
                 all_results.append(result)
@@ -218,7 +223,8 @@ with tab_single:
                 # Update live status
                 found_count = sum(1 for r in all_results if r.found)
                 status_placeholder.markdown(
-                    f"**{count}/16** vendors done — **{found_count}** found"
+                    f"**{progress_state['count']}/{total_vendors}** vendors done "
+                    f"— **{found_count}** found"
                 )
 
                 # Rebuild and display table
@@ -237,7 +243,8 @@ with tab_single:
 
         found_total = sum(1 for r in all_results if r.found)
         status_placeholder.markdown(
-            f"**16/16** vendors done — **{found_total}** found ✓"
+            f"**{total_vendors}/{total_vendors}** vendors done "
+            f"— **{found_total}** found ✓"
         )
 
         # Save results to database
@@ -296,83 +303,110 @@ with tab_batch:
                 from models.models import PriceResult
 
                 progress_bar = st.progress(0)
-                batch_status = st.empty()
-                all_results = []
+                status_text = st.empty()
+                
+                # Containers for real-time updates
+                all_results_dict = {} # mpn -> {vendor: result}
                 display_results_list = []
-                successful_count = 0
                 vendor_rows = []
+                
                 start_time = time.time()
                 detailed_batch = (batch_scrape_mode == "More Info")
 
-                for i, mpn in enumerate(mpns_to_scan):
-                    progress_bar.progress((i + 1) / len(mpns_to_scan))
+                # Initialize Async Batch Scraper
+                scraper_system = AsyncBatchScraper(mpns_to_scan, detailed=detailed_batch)
+                
+                total_expected_results = len(mpns_to_scan) * 16 # 16 vendors
+                progress_state = {'received': 0}
+                
+                async def run_batch():
+                    async for res_item in scraper_system.start():
+                        progress_state['received'] += 1
+                        results_received = progress_state['received']
+                        mpn = res_item['mpn']
+                        vendor = res_item['vendor']
+                        result = res_item['result']
+                        
+                        # Update progress
+                        progress = results_received / total_expected_results
+                        progress_bar.progress(min(progress, 1.0))
+                        status_text.text(f"Processing... {results_received}/{total_expected_results} checks completed.")
+                        
+                        # Save result
+                        if mpn not in all_results_dict:
+                            all_results_dict[mpn] = {}
+                        all_results_dict[mpn][vendor] = result
 
-                    # Stream results for this MPN with live vendor counter
-                    mpn_results = []
-
-                    async def _stream_mpn(search_mpn, det, mpn_idx, total_mpns):
-                        async for vname, result in scrape_mpn_streaming(search_mpn, det):
-                            if result is None:
-                                result = PriceResult(
-                                    vendor_id=vname.lower().replace(" ", "_"),
-                                    found=False,
-                                )
-                            mpn_results.append(result)
-                            batch_status.markdown(
-                                f"**MPN {mpn_idx}/{total_mpns}**: `{search_mpn}` "
-                                f"— {len(mpn_results)}/16 vendors"
+                        if result:
+                            # Process and save to DB immediately
+                            vendor_display_name = vendor_names.get(result.vendor_id, result.vendor_id)
+                            process_and_save_result(
+                                mpn=mpn.strip(),
+                                vendor_name=vendor_display_name,
+                                found=result.found,
+                                price=float(result.price) if result.price else None
                             )
+                            
+                            # Add to detailed rows
+                            price_value = float(result.price) if result.price else None
+                            vendor_rows.append({
+                                'MPN': mpn,
+                                'Vendor': vendor_display_name,
+                                'Price': price_value,
+                                'Found': "✅" if result.found else "❌",
+                                'In Stock': "✅" if result.in_stock else ("❌" if result.in_stock is False else "N/A"),
+                                'Condition': result.condition if result.condition else None,
+                                'URL': str(result.url) if result.url else None
+                            })
 
-                    asyncio.run(_stream_mpn(mpn, detailed_batch, i + 1, len(mpns_to_scan)))
-
-                    # Process and save results to database
-                    for res in mpn_results:
-                        vendor_display_name = vendor_names.get(res.vendor_id, res.vendor_id)
-                        process_and_save_result(
-                            mpn=mpn.strip(),
-                            vendor_name=vendor_display_name,
-                            found=res.found,
-                            price=float(res.price) if res.price else None
-                        )
-
-                    mpn_result = {'MPN': mpn}
-                    prices = [float(res.price) for res in mpn_results if res.price]
+                asyncio.run(run_batch())
+                
+                # Post-processing for Display Matrix
+                successful_count = 0
+                all_results = []
+                
+                for mpn in mpns_to_scan:
+                    mpn_data = all_results_dict.get(mpn, {})
+                    
+                    # Calculate best price
+                    prices = []
+                    for v_res in mpn_data.values():
+                        if v_res and v_res.price:
+                            prices.append(float(v_res.price))
                     lowest_price = min(prices) if prices else None
-
-                    for res in mpn_results:
-                        vendor_display_name = vendor_names.get(res.vendor_id, res.vendor_id)
-                        price_value = float(res.price) if res.price else None
-                        mpn_result[f'{vendor_display_name} Price'] = price_value
-                        mpn_result[f'{vendor_display_name} Status'] = "✅" if res.found else "❌"
-
-                        if detailed_batch:
-                            stock_value = (
-                                "✅ In Stock" if res.in_stock
-                                else ("❌ Out of Stock" if res.in_stock is False else "Unknown")
-                            )
-                            mpn_result[f'{vendor_display_name} Stock'] = stock_value
-                            mpn_result[f'{vendor_display_name} Condition'] = res.condition or "Unknown"
-                        vendor_rows.append({
-                            'MPN': mpn,
-                            'Vendor': vendor_display_name,
-                            'Price': price_value,
-                            'Found': "✅" if res.found else "❌",
-                            'In Stock': "✅" if res.in_stock else ("❌" if res.in_stock is False else "N/A"),
-                            'Condition': res.condition if res.condition else None,
-                            'URL': str(res.url) if res.url else None
-                        })
-
-                    # Build display-friendly dictionary (one column per vendor with status icons)
+                    if lowest_price:
+                        successful_count += 1
+                        
+                    # Build Row
+                    mpn_result = {'MPN': mpn, 'Best Price': lowest_price}
                     display_result = {'MPN': mpn, 'Best Price': lowest_price}
+                    
+                    # Check all known vendors (even if missed/timed out)
+                    current_scrapers = scraper_system.scrapers # Get list of (name, inst)
+                    
+                    for v_name, _ in current_scrapers:
+                        res = mpn_data.get(v_name)
+                        vendor_display_name = vendor_names.get(v_name.lower().replace(" ", "_"), v_name)
+                        if not vendor_display_name: # Fallback
+                             vendor_display_name = v_name
 
-                    for res in mpn_results:
-                        vendor_display_name = vendor_names.get(res.vendor_id, res.vendor_id)
+                        # For Detailed CSV
+                        if res:
+                             mpn_result[f'{vendor_display_name} Price'] = float(res.price) if res.price else None
+                             mpn_result[f'{vendor_display_name} Status'] = "✅" if res.found else "❌"
+                             if detailed_batch:
+                                 stock_value = "✅ In Stock" if res.in_stock else ("❌ Out of Stock" if res.in_stock is False else "Unknown")
+                                 mpn_result[f'{vendor_display_name} Stock'] = stock_value
+                                 mpn_result[f'{vendor_display_name} Condition'] = res.condition or "Unknown"
+                        else:
+                             mpn_result[f'{vendor_display_name} Price'] = None
+                             mpn_result[f'{vendor_display_name} Status'] = "—"
 
-                        if not res.found or res.price is None:
+                        # For Display Matrix
+                        if not res or not res.found or res.price is None:
                             display_val = "—"
                         else:
                             price_str = f"${float(res.price):.2f}"
-
                             if detailed_batch:
                                 if res.in_stock is True:
                                     status_icon = "🟢"
@@ -382,19 +416,14 @@ with tab_batch:
                                     status_icon = "❓"
                             else:
                                 status_icon = ""
-
                             display_val = f"{price_str} {status_icon}".strip()
-
+                        
                         display_result[vendor_display_name] = display_val
-
-                    mpn_result['Best Price'] = lowest_price
-                    if lowest_price is not None:
-                        successful_count += 1
-
+                        
                     all_results.append(mpn_result)
                     display_results_list.append(display_result)
-
-                batch_status.markdown("**Batch complete** ✓")
+                    
+                status_text.text("Batch processing complete!")
 
                 elapsed_time = time.time() - start_time
                 success_rate = (successful_count / len(mpns_to_scan) * 100)

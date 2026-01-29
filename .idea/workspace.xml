@@ -4,7 +4,8 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="f49f1f88-9e35-4013-9fa9-4f5b2e80ef1e" name="Changes" comment="speed optimized">
+    <list default="true" id="f49f1f88-9e35-4013-9fa9-4f5b2e80ef1e" name="Changes" comment="Progress bar added">
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/app.py" beforeDir="false" afterPath="$PROJECT_DIR$/app.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/scraper.py" beforeDir="false" afterPath="$PROJECT_DIR$/scraper.py" afterDir="false" />
     </list>
@@ -116,7 +117,7 @@
       <updated>1766475682484</updated>
       <workItem from="1766475683721" duration="58439000" />
       <workItem from="1768970619400" duration="15310000" />
-      <workItem from="1769505180039" duration="27814000" />
+      <workItem from="1769505180039" duration="30849000" />
     </task>
     <task id="LOCAL-00001" summary="upload">
       <option name="closed" value="true" />
@@ -262,7 +263,15 @@
       <option name="project" value="LOCAL" />
       <updated>1769653579141</updated>
     </task>
-    <option name="localTasksCounter" value="19" />
+    <task id="LOCAL-00019" summary="Progress bar added">
+      <option name="closed" value="true" />
+      <created>1769654935284</created>
+      <option name="number" value="00019" />
+      <option name="presentableId" value="LOCAL-00019" />
+      <option name="project" value="LOCAL" />
+      <updated>1769654935284</updated>
+    </task>
+    <option name="localTasksCounter" value="20" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -304,7 +313,8 @@
     <MESSAGE value="devicedeal scraper bug fixed" />
     <MESSAGE value="bug fixed" />
     <MESSAGE value="speed optimized" />
-    <option name="LAST_COMMIT_MESSAGE" value="speed optimized" />
+    <MESSAGE value="Progress bar added" />
+    <option name="LAST_COMMIT_MESSAGE" value="Progress bar added" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>
