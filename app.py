@@ -275,15 +275,7 @@ with tab_single:
 # TAB 2: CSV BATCH PROCESSING
 with tab_batch:
     st.markdown("### 📄 Upload & Manage Batch")
-    batch_scrape_mode = st.radio(
-        "Scrape Mode:",
-        options=["Fast", "More Info"],
-        horizontal=True,
-        help="Fast uses HTTP scrapers for speed. More Info switches to Playwright-only scrapers to capture stock status and condition."
-    )
-
-    if batch_scrape_mode == "Fast":
-        st.info("For full stock availability details choose More Info mode (slower).", icon="ℹ️")
+    batch_scrape_mode = "Fast"
 
     uploaded_file = st.file_uploader("Upload CSV", type=['csv'])
 
