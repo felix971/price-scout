@@ -1,16 +1,27 @@
 # Price Scout
 
-**Price Scout** is a web scraping and price comparison tool for computer parts in Australia. Search for computer components by their Manufacturer Part Number (MPN) across five major Australian PC retailers and compare prices to find the best deals.
+**Price Scout** is a web scraping and price comparison tool for computer parts in Australia. Search for computer components by their Manufacturer Part Number (MPN) across 16 major Australian PC retailers and marketplaces, and compare prices to find the best deals.
 
 ## Features
 
 ### Core Functionality
-- **Multi-Vendor Price Scraping**: Compare prices across 5 major Australian retailers:
+- **Multi-Vendor Price Scraping**: Compare prices across 16 Australian retailers and marketplaces:
+  - Digicor
   - Scorptec Computers
   - Mwave Australia
   - PC Case Gear
   - JW Computers
   - Umart
+  - Centrecom
+  - Computer Alliance
+  - CPL
+  - Device Deal
+  - PB Tech
+  - Wired Zone
+  - PLE Computers
+  - Server Supply
+  - eBay Australia
+  - Amazon Australia
 
 - **Dual Interface**:
   - Modern web dashboard built with Streamlit
@@ -23,7 +34,8 @@
   - Success rate metrics and statistics
   - Processing time analysis
   - Automatic best price identification
-  - Export results to CSV
+  - Export results to CSV (Detailed Results or Vendor Availability format)
+  - Dedicated CLI batch module with per-site rate limiting
 
 - **Price History & Analytics**:
   - SQLite database stores all price data
@@ -37,18 +49,12 @@
 - **Multi-threading**: Processes multiple MPNs simultaneously with rate limiting
 - **Cloudflare Bypass**: Handles Cloudflare-protected sites
 - **JavaScript Rendering**: Uses Playwright for JavaScript-heavy sites
+- **Centralized Browser Management**: Singleton `PlaywrightManager` with shared browser instance, user-agent rotation, and stealth script injection
+- **Triple Scraper Implementations**: Most vendors have HTTP, Playwright, and cloud/base implementations for maximum flexibility
 - **Smart Database Logic**:
   - Creates new record when price changes
   - Updates timestamp when price remains the same
   - Prevents duplicate data while maintaining complete history
-
-## Recent Updates
-
-- **Dual Scraper Implementations**: Added HTTP-based scrapers alongside browser-based versions for improved performance
-- **Fallback Logic**: Enhanced Scorptec scraper with robust fallback mechanisms
-- **Optimized Performance**: Reduced scraping time with lightweight HTTP implementations for CLI
-- **Enhanced Documentation**: Comprehensive docstrings added across all modules
-- **Improved Reliability**: Better error handling and site variation support
 
 ## Technology Stack
 
@@ -58,7 +64,7 @@
 - **Playwright**: Browser automation for JavaScript-rendered sites
 - **cloudscraper**: HTTP requests with Cloudflare bypass capability
 - **curl_cffi**: Alternative HTTP client for enhanced reliability
-- **BeautifulSoup4**: HTML parsing
+- **BeautifulSoup4 / lxml**: HTML parsing
 - **Pandas**: Data manipulation and CSV handling
 - **Plotly**: Interactive data visualizations
 - **Pydantic**: Data validation and schema modeling
@@ -69,29 +75,42 @@
 price-scout/
 ├── app.py                      # Streamlit dashboard application
 ├── main.py                     # CLI entry point
-├── scraper.py                  # Core scraping logic and batch processing
+├── scraper.py                  # Core scraping logic and async batch processing
 ├── test.py                     # Manual testing script
 ├── requirements.txt            # Python dependencies
 ├── app.db                      # SQLite database (auto-created)
 │
 ├── scrapers/                   # Vendor-specific scraper implementations
-│   ├── scorptec/              # Scorptec scraper modules
-│   │   ├── scorptec_scraper_fallback.py  # Fallback implementation
-│   │   └── scorptec_scraper_http.py      # HTTP implementation
-│   ├── mwave_scraper.py       # Mwave (cloudscraper)
-│   ├── pccg/                  # PC Case Gear scraper modules
-│   │   ├── pc_case_gear_scraper.py       # Browser-based implementation
-│   │   └── pc_case_gear_scraper_http.py  # HTTP implementation
-│   ├── jwc/                   # JW Computers scraper modules
-│   │   ├── jw_computer_scraper.py        # Browser-based implementation
-│   │   └── jw_computer_scraper_http.py   # HTTP implementation
-│   └── umart/                 # Umart scraper modules
-│       ├── umart_scraper.py              # Browser-based implementation
-│       └── umart_scraper_http.py         # HTTP implementation
+│   ├── scorptec/              # Scorptec (base + HTTP + cloud)
+│   ├── mwave/                 # Mwave (base + HTTP + Playwright)
+│   ├── pccg/                  # PC Case Gear (base + HTTP + Playwright)
+│   ├── jwc/                   # JW Computers (base + HTTP + Playwright)
+│   ├── umart/                 # Umart (base + HTTP + Playwright)
+│   ├── centrecom/             # Centrecom (base + HTTP + Playwright)
+│   ├── amazon/                # Amazon AU (base + HTTP + Playwright)
+│   ├── ebay/                  # eBay AU (base + HTTP + Playwright)
+│   ├── pbtech/                # PB Tech (base + HTTP + Playwright)
+│   ├── ple/                   # PLE Computers (base + HTTP + Playwright)
+│   ├── wiredzone/             # Wired Zone (base)
+│   ├── serversupply/          # Server Supply (base)
+│   ├── devicedeal/            # Device Deal (base)
+│   ├── digicor_scraper.py     # Digicor
+│   ├── cpl_scraper.py         # CPL
+│   └── computeralliance_scraper.py  # Computer Alliance
+│
+├── batch/                      # Dedicated batch processing CLI module
+│   ├── __main__.py            # Entry point (python -m batch)
+│   ├── cli.py                 # CLI argument parser
+│   ├── config.py              # Site registry with rate-limiting config
+│   ├── runner.py              # Async batch processing runner
+│   └── scheduler.py           # Task scheduling logic
 │
 ├── models/                     # Data models and base classes
 │   ├── models.py              # PriceResult Pydantic model
 │   └── base_scraper.py        # Abstract base scraper class
+│
+├── utils/                      # Utility modules
+│   └── playwright_manager.py  # Centralized Playwright browser singleton
 │
 └── db/                         # Database layer
     └── db_manager.py          # DatabaseManager with all DB operations
@@ -112,9 +131,17 @@ price-scout/
    ```
 
 2. **Create and activate virtual environment**:
+
+   **macOS / Linux:**
    ```bash
    python3 -m venv .venv
-   source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+   source .venv/bin/activate
+   ```
+
+   **Windows:**
+   ```powershell
+   py -m venv .venv
+   .venv\Scripts\activate
    ```
 
 3. **Install dependencies**:
@@ -140,7 +167,7 @@ streamlit run app.py
 The dashboard will open in your browser at `http://localhost:8501` with three main tabs:
 
 1. **Single Query**: Search for one product by MPN
-2. **Batch Processing**: Upload a CSV file with multiple MPNs
+2. **Batch Processing**: Upload a CSV file with multiple MPNs for bulk price comparison
 3. **Analytics**: View price history and trends
 
 ### Command Line Interface (CLI)
@@ -150,9 +177,15 @@ The dashboard will open in your browser at `http://localhost:8501` with three ma
 python main.py --mpn BX8071512400
 ```
 
-**Batch Processing**:
+**Batch Processing (via main.py)**:
 ```bash
 python main.py --csv input.csv --output results.csv
+```
+
+**Batch Processing (via batch module)**:
+```bash
+python -m batch input.csv -o results.csv
+python -m batch input.csv -o results.csv --sites devicedeal,cpl,umart
 ```
 
 ### CSV Format for Batch Processing
@@ -171,7 +204,7 @@ BX8071512100F
 ### Scraping Architecture
 
 1. User inputs MPN via CLI or web dashboard
-2. Five scrapers execute concurrently using `asyncio.gather()`
+2. 16 scrapers execute concurrently using `asyncio.gather()`
 3. Each scraper:
    - Searches the vendor's website using the MPN
    - Extracts product details and price
@@ -182,17 +215,18 @@ BX8071512100F
 
 ### Scraper Types
 
-Each vendor scraper has been optimized with dual implementation strategies:
+Each vendor scraper is optimized with multiple implementation strategies:
 
-- **HTTP Implementations**: Fast, lightweight HTTP requests with `cloudscraper` for Cloudflare bypass
-  - Used by: Scorptec, Mwave, PC Case Gear (HTTP), JW Computers (HTTP), Umart (HTTP)
+- **HTTP Implementations**: Fast, lightweight HTTP requests with `cloudscraper` or `curl_cffi` for Cloudflare bypass
   - Best for: CLI batch processing and quick queries
 
-- **Browser-Based Implementations**: Playwright headless browser for JavaScript-heavy sites
-  - Used by: PC Case Gear, JW Computers, Umart
-  - Best for: Sites with dynamic content loading
+- **Playwright Implementations**: Headless browser for JavaScript-heavy sites
+  - Best for: Sites with dynamic content loading, capturing stock status and condition
 
-- **Fallback Logic**: Scorptec includes fallback mechanisms to handle different site responses
+- **Cloud Implementations**: Specialized cloud scraper variants (e.g., Scorptec)
+  - Best for: Sites with advanced bot protection
+
+The `PlaywrightManager` singleton manages a shared browser instance across all Playwright scrapers, with user-agent rotation and stealth script injection for reliability.
 
 ### Database Schema
 
@@ -222,10 +256,11 @@ Modify the script to test specific vendors or MPNs.
 - **Models**: Pydantic models in [models/models.py](models/models.py) ensure data validation
 - **Database**: Centralized database operations in [db/db_manager.py](db/db_manager.py)
 - **Scraper Logic**: Main scraping orchestration in [scraper.py](scraper.py)
-- **Dual Implementations**: Most vendors have both HTTP and browser-based implementations for flexibility
-  - HTTP versions (suffix `_http.py`) used in CLI for better performance
-  - Browser versions used in web dashboard for reliability with dynamic content
-  - Fallback implementations handle edge cases and site variations
+- **Browser Management**: Centralized Playwright singleton in [utils/playwright_manager.py](utils/playwright_manager.py)
+- **Triple Implementations**: Most vendors have HTTP, Playwright, and base implementations
+  - HTTP versions (suffix `_http.py`) used for fast scraping
+  - Playwright versions (suffix `_playwright.py`) used for detailed scraping with stock/condition info
+  - Base versions used as default implementations
 
 ## Limitations
 
@@ -233,6 +268,25 @@ Modify the script to test specific vendors or MPNs.
 - **MPN Required**: Products must have valid manufacturer part numbers
 - **Rate Limiting**: Batch processing includes delays to avoid overwhelming vendor servers
 - **Headless Browser**: Some scrapers require Chromium (installed via Playwright)
+
+## Troubleshooting
+
+### Windows: Recreating the Virtual Environment
+
+If you encounter Python version issues or a corrupted virtual environment on Windows:
+
+```powershell
+# 1. Delete the old environment (right-click and delete the .venv folder)
+
+# 2. Create a new environment using the latest Python version
+py -m venv .venv
+
+# 3. Activate the environment
+.venv\Scripts\activate
+
+# 4. Verify the Python version
+python --version
+```
 
 ## Acknowledgments
 
