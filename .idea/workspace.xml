@@ -5,19 +5,11 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="f49f1f88-9e35-4013-9fa9-4f5b2e80ef1e" name="Changes" comment="speed optimized by eliminating playwright">
+      <change beforePath="$PROJECT_DIR$/.idea/inspectionProfiles/profiles_settings.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/inspectionProfiles/profiles_settings.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/models/base_scraper.py" beforeDir="false" afterPath="$PROJECT_DIR$/models/base_scraper.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/batch/config.py" beforeDir="false" afterPath="$PROJECT_DIR$/batch/config.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/batch/scheduler.py" beforeDir="false" afterPath="$PROJECT_DIR$/batch/scheduler.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/scraper.py" beforeDir="false" afterPath="$PROJECT_DIR$/scraper.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/scrapers/amazon/amazon_scraper_playwright.py" beforeDir="false" afterPath="$PROJECT_DIR$/scrapers/amazon/amazon_scraper_playwright.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/scrapers/centrecom/centrecom_scraper_playwright.py" beforeDir="false" afterPath="$PROJECT_DIR$/scrapers/centrecom/centrecom_scraper_playwright.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/scrapers/jwc/jw_computer_scraper_playwright.py" beforeDir="false" afterPath="$PROJECT_DIR$/scrapers/jwc/jw_computer_scraper_playwright.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/scrapers/pccg/pc_case_gear_scraper_playwright.py" beforeDir="false" afterPath="$PROJECT_DIR$/scrapers/pccg/pc_case_gear_scraper_playwright.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/scrapers/ple/ple_scraper.py" beforeDir="false" afterPath="$PROJECT_DIR$/scrapers/ple/ple_scraper.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/scrapers/ple/ple_scraper_playwright.py" beforeDir="false" afterPath="$PROJECT_DIR$/scrapers/ple/ple_scraper_playwright.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/scrapers/serversupply/serversupply_scraper.py" beforeDir="false" afterPath="$PROJECT_DIR$/scrapers/serversupply/serversupply_scraper.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/scrapers/umart/umart_scraper_http.py" beforeDir="false" afterPath="$PROJECT_DIR$/scrapers/umart/umart_scraper_http.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/scrapers/wiredzone/wiredzone_scraper.py" beforeDir="false" afterPath="$PROJECT_DIR$/scrapers/wiredzone/wiredzone_scraper.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/utils/playwright_manager.py" beforeDir="false" afterPath="$PROJECT_DIR$/utils/playwright_manager.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -58,22 +50,22 @@
     &quot;assignee&quot;: &quot;felix971&quot;
   }
 }</component>
-  <component name="GithubPullRequestsUISettings"><![CDATA[{
-  "selectedUrlAndAccountId": {
-    "url": "https://github.com/felix971/price-scout.git",
-    "accountId": "0932ba8b-59a0-4c77-9f1a-7b4f9ac46962"
+  <component name="GithubPullRequestsUISettings">{
+  &quot;selectedUrlAndAccountId&quot;: {
+    &quot;url&quot;: &quot;https://github.com/felix971/price-scout.git&quot;,
+    &quot;accountId&quot;: &quot;0932ba8b-59a0-4c77-9f1a-7b4f9ac46962&quot;
   },
-  "recentNewPullRequestHead": {
-    "server": {
-      "useHttp": false,
-      "host": "github.com",
-      "port": null,
-      "suffix": null
+  &quot;recentNewPullRequestHead&quot;: {
+    &quot;server&quot;: {
+      &quot;useHttp&quot;: false,
+      &quot;host&quot;: &quot;github.com&quot;,
+      &quot;port&quot;: null,
+      &quot;suffix&quot;: null
     },
-    "owner": "michaelwsd",
-    "repository": "price-scout"
+    &quot;owner&quot;: &quot;michaelwsd&quot;,
+    &quot;repository&quot;: &quot;price-scout&quot;
   }
-}]]></component>
+}</component>
   <component name="HighlightingSettingsPerFile">
     <setting file="file:///Library/Frameworks/Python.framework/Versions/3.13/lib/python3.13/site-packages/playwright/_impl/_connection.py" root0="SKIP_INSPECTION" />
   </component>
@@ -85,25 +77,25 @@
     <option name="hideEmptyMiddlePackages" value="true" />
     <option name="showLibraryContents" value="true" />
   </component>
-  <component name="PropertiesComponent"><![CDATA[{
-  "keyToString": {
-    "ModuleVcsDetector.initialDetectionPerformed": "true",
-    "Python.app.executor": "Run",
-    "Python.main.executor": "Run",
-    "RunOnceActivity.ShowReadmeOnStart": "true",
-    "RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252": "true",
-    "RunOnceActivity.git.unshallow": "true",
-    "ToolWindow.Terminal.ShowToolbar": "false",
-    "git-widget-placeholder": "batch-scraper",
-    "node.js.detected.package.eslint": "true",
-    "node.js.detected.package.tslint": "true",
-    "node.js.selected.package.eslint": "(autodetect)",
-    "node.js.selected.package.tslint": "(autodetect)",
-    "nodejs_package_manager_path": "npm",
-    "settings.editor.selected.configurable": "com.jetbrains.python.configuration.PyActiveSdkModuleConfigurable",
-    "vue.rearranger.settings.migration": "true"
+  <component name="PropertiesComponent">{
+  &quot;keyToString&quot;: {
+    &quot;ModuleVcsDetector.initialDetectionPerformed&quot;: &quot;true&quot;,
+    &quot;Python.app.executor&quot;: &quot;Run&quot;,
+    &quot;Python.main.executor&quot;: &quot;Run&quot;,
+    &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.git.unshallow&quot;: &quot;true&quot;,
+    &quot;ToolWindow.Terminal.ShowToolbar&quot;: &quot;false&quot;,
+    &quot;git-widget-placeholder&quot;: &quot;batch-scraper&quot;,
+    &quot;node.js.detected.package.eslint&quot;: &quot;true&quot;,
+    &quot;node.js.detected.package.tslint&quot;: &quot;true&quot;,
+    &quot;node.js.selected.package.eslint&quot;: &quot;(autodetect)&quot;,
+    &quot;node.js.selected.package.tslint&quot;: &quot;(autodetect)&quot;,
+    &quot;nodejs_package_manager_path&quot;: &quot;npm&quot;,
+    &quot;settings.editor.selected.configurable&quot;: &quot;com.jetbrains.python.configuration.PyActiveSdkModuleConfigurable&quot;,
+    &quot;vue.rearranger.settings.migration&quot;: &quot;true&quot;
   }
-}]]></component>
+}</component>
   <component name="RecentsManager">
     <key name="MoveFile.RECENT_KEYS">
       <recent name="$PROJECT_DIR$/.claude/skills/systematic-debugging" />

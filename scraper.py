@@ -52,11 +52,11 @@ logger = logging.getLogger("price-scout")
 # Per-vendor scraping configuration overrides.
 # Vendors not listed here use DEFAULT_CONFIG.
 VENDOR_CONFIG = {
-    "Amazon AU": {"concurrency": 5, "timeout": 45.0, "jitter": (1.5, 3.0)},
-    "eBay AU":   {"concurrency": 5, "timeout": 45.0, "jitter": (1.5, 3.0)},
-    "Umart":     {"concurrency": 5, "timeout": 40.0, "jitter": (0.5, 1.5)},
+    "Amazon AU": {"concurrency": 5, "timeout": 25.0, "jitter": (1.0, 2.5)},
+    "eBay AU":   {"concurrency": 5, "timeout": 25.0, "jitter": (1.0, 2.5)},
+    "Umart":     {"concurrency": 6, "timeout": 20.0, "jitter": (0.3, 0.8)},
 }
-DEFAULT_CONFIG = {"concurrency": 5, "timeout": 20.0, "jitter": (0.5, 1.5)}
+DEFAULT_CONFIG = {"concurrency": 6, "timeout": 15.0, "jitter": (0.3, 0.8)}
 
 def get_scraper_instances(detailed=False):
     """Return list of (vendor_name, scraper_instance) tuples."""

@@ -25,8 +25,8 @@ class DomainQueue:
         site_id: str,
         label: str,
         scraper: BaseScraper,
-        max_concurrent: int = 2,
-        delay: float = 1.5,
+        max_concurrent: int = 4,
+        delay: float = 0.8,
     ):
         self.site_id = site_id
         self.label = label
@@ -39,7 +39,7 @@ class DomainQueue:
 
     async def scrape_one(
         self, mpn: str, on_result: Optional[Callable] = None,
-        timeout: float = 30.0,
+        timeout: float = 15.0,
     ) -> PriceResult:
         """Scrape a single MPN with rate limiting and per-task timeout."""
         async with self.semaphore:
